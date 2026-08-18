@@ -20,7 +20,7 @@ The plugin is split into five native Unraid tabs:
 2. **ZVOL Creator** — create thin/thick ZVOLs with compression and volblocksize controls.
 3. **Snapshot Manager** — create/delete snapshots and clone snapshots with automatic or custom names.
 4. **Snapshot Refresher** — use one ZVOL as the new base and safely refresh selected same-pool targets.
-5. **Misc** — per-backstore SCSI UNMAP (`emulate_tpu`) controls and Windows space-reclaim instructions.
+5. **Misc** — automatic/per-backstore SCSI UNMAP controls and Windows space-reclaim instructions.
 
 ## Z Status / iSCSI visibility
 
@@ -61,9 +61,14 @@ The page also reports LIO `emulate_tpu` as **UNMAP on/off** and checks the ZVOL 
   - attempt automatic rollback of a target rename if cloning fails.
 - Misc:
   - show currently mapped LIO block backstores;
-  - enable/disable SCSI UNMAP through `emulate_tpu=1/0`;
-  - verify the live LIO value after each change;
+  - enable/disable SCSI UNMAP per ZVOL backstore through `emulate_tpu=1/0`;
+  - optional **Auto-enable UNMAP** policy, persisted in `/boot/config/plugins/unraid-iscsi-manager/settings.cfg`;
+  - while that policy is On, check once per minute for mapped block backstores that resolve to ZVOLs and enable `emulate_tpu=1` when needed;
+  - ignore physical disks and other block backstores that do not resolve to `/dev/zvol/...`;
+  - verify the live LIO value after manual changes;
   - provide Windows reconnect/ReTrim instructions.
+
+The automatic UNMAP policy defaults to **Off**. Turning it Off later stops future enforcement but intentionally leaves existing `emulate_tpu` values unchanged. Use the per-backstore control when you explicitly want to turn one Off.
 
 ## TRIM / space reclaim semantics
 
@@ -92,7 +97,7 @@ This plugin manages block devices. Before Refresh/Rebase, disconnect the source 
 
 The mapping removal requirement is intentional: the refresher renames the old ZVOL and creates a new block device at the original dataset name. An existing LIO block backstore can remain attached to the old device after the rename, so leaving the mapping configured could cause the IQN to continue serving the backup instead of the newly created clone.
 
-The Misc UNMAP switch only changes LIO's `emulate_tpu` attribute. It does **not** run `blkdiscard` and does not discard an entire ZVOL.
+The Misc UNMAP controls only change LIO's `emulate_tpu` attribute. They do **not** run `blkdiscard` and do not discard an entire ZVOL.
 
 V1 only refreshes ZVOLs within the same ZFS pool. Cross-pool replication is intentionally left for a future `zfs send | zfs receive` implementation.
 
