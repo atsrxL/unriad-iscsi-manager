@@ -60,7 +60,7 @@ backstore_device() {
 }
 
 backstore_unmap() {
-  local target_dir="${1:-}" value=""
+  local target_dir="${1:-}" type="${2:-}" name="${3:-}" value="" output=""
   if [[ -r "$target_dir/attrib/emulate_tpu" ]]; then
     value="$(tr -d '\r\n' < "$target_dir/attrib/emulate_tpu" 2>/dev/null || true)"
     case "$value" in
@@ -68,6 +68,21 @@ backstore_unmap() {
       0) echo "off" ; return 0 ;;
     esac
   fi
+
+  # Some packaged LIO/configfs layouts do not expose the attribute through
+  # the resolved LUN symlink in the same way. Ask targetcli as a fallback.
+  if command -v targetcli >/dev/null 2>&1 && [[ -n "$type" && -n "$name" ]]; then
+    output="$(targetcli "/backstores/$type/$name" get attribute emulate_tpu 2>/dev/null || true)"
+    if grep -Eq 'emulate_tpu([ =:]+)1([[:space:]]|$)' <<< "$output"; then
+      echo "on"
+      return 0
+    fi
+    if grep -Eq 'emulate_tpu([ =:]+)0([[:space:]]|$)' <<< "$output"; then
+      echo "off"
+      return 0
+    fi
+  fi
+
   echo "unknown"
 }
 
@@ -104,7 +119,7 @@ for iqn_dir in "$root"/*; do
           type="$(backstore_type_name "$core_type")"
           device="$(backstore_device "$target_dir" "$type" "$backstore")"
           zvol="$(zvol_for_device "$device")"
-          unmap="$(backstore_unmap "$target_dir")"
+          unmap="$(backstore_unmap "$target_dir" "$type" "$backstore")"
         fi
 
         if [[ -e "$lun_dir/alua_tg_pt_gp" ]]; then
