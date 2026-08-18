@@ -25,7 +25,7 @@
 
 <CHANGES>
 ### @VERSION@
-- Initial V1 release with automated GitHub Release packaging.
+- Initial V1 release with automated GitHub Release packaging and package MD5 verification.
 - Create ZVOLs with thin/thick provisioning, LZ4 compression toggle and 4K/8K/16K/32K/64K/128K volblocksize.
 - Snapshot creation/deletion with clone dependency protection.
 - Snapshot clone with automatic clone1/clone2 numbering or a custom name.
