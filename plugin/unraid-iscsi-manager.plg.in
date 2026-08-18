@@ -1,0 +1,71 @@
+<?xml version="1.0" standalone="yes"?>
+<!DOCTYPE PLUGIN [
+<!ENTITY name       "unraid-iscsi-manager">
+<!ENTITY author     "atsrxL">
+<!ENTITY version    "@VERSION@">
+<!ENTITY launch     "Settings/unraid-iscsi-manager">
+<!ENTITY repo       "atsrxL/unriad-iscsi-manager">
+<!ENTITY releaseURL "https://github.com/&repo;/releases/download/&version;">
+<!ENTITY pluginURL  "https://github.com/&repo;/releases/latest/download/&name;.plg">
+<!ENTITY plugin     "/boot/config/plugins/&name;">
+<!ENTITY emhttp     "/usr/local/emhttp/plugins/&name;">
+<!ENTITY pkgMD5     "@PACKAGE_MD5@">
+]>
+
+<PLUGIN
+  name="&name;"
+  author="&author;"
+  version="&version;"
+  launch="&launch;"
+  pluginURL="&pluginURL;"
+  min="6.12.0"
+  support="https://github.com/&repo;/issues"
+  icon="database"
+>
+
+<CHANGES>
+### @VERSION@
+- Initial V1 release.
+- Create ZVOLs with thin/thick provisioning, LZ4 compression toggle and 4K/8K/16K/32K/64K/128K volblocksize.
+- Snapshot creation/deletion with clone dependency protection.
+- Snapshot clone with automatic clone1/clone2 numbering or a custom name.
+- Same-pool multi-target Safe Refresh: source snapshot -> rename old targets as backups -> recreate target names as CoW clones.
+- Best-effort targetcli/fuser busy checks before refresh.
+</CHANGES>
+
+<FILE Run="/bin/bash">
+  <INLINE>
+    if ! command -v zfs >/dev/null 2>&1 || ! command -v zpool >/dev/null 2>&1; then
+      echo "ZFS tools were not found. This plugin requires an Unraid system with ZFS support."
+      exit 1
+    fi
+    mkdir -p &plugin;/packages
+    rm -f &plugin;/packages/&name;-*.txz 2>/dev/null || true
+  </INLINE>
+</FILE>
+
+<FILE Name="&plugin;/packages/&name;-&version;.txz">
+  <URL>&releaseURL;/&name;-&version;.txz</URL>
+  <MD5>&pkgMD5;</MD5>
+</FILE>
+
+<FILE Run="/bin/bash">
+  <INLINE>
+    rm -rf &emhttp;
+    /sbin/installpkg &plugin;/packages/&name;-&version;.txz
+    chmod +x &emhttp;/scripts/*.sh 2>/dev/null || true
+    echo ""
+    echo "iSCSI ZVOL Manager &version; installed."
+    echo "Open Settings -> iSCSI ZVOL Manager."
+  </INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="remove">
+  <INLINE>
+    rm -rf &emhttp;
+    rm -rf &plugin;
+    echo "iSCSI ZVOL Manager removed. ZVOLs and snapshots were not modified."
+  </INLINE>
+</FILE>
+
+</PLUGIN>
