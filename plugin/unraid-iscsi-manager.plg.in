@@ -25,12 +25,11 @@
 
 <CHANGES>
 ### @VERSION@
-- Add a persistent Auto-enable UNMAP policy in Misc, defaulting to Off.
-- When enabled, reconcile mapped LIO block backstores that resolve to ZVOLs and set emulate_tpu=1 when needed.
-- Check once per minute so ZVOL backstores created later by another iSCSI plugin are picked up automatically.
-- Ignore physical disks and block backstores that cannot be correlated to /dev/zvol/ devices.
-- Keep per-backstore manual UNMAP On/Off controls and Windows reconnect/ReTrim instructions.
-- Turning the automatic policy Off stops future enforcement without silently disabling already-enabled backstores.
+- Redesign Snapshot Manager as a snapshot-to-clone dependency tree so clone relationships are visible at a glance.
+- Show clone size, used space, origin, and iSCSI mapping/session state directly under the parent snapshot.
+- Add safe Delete Clone support. Deletion is non-recursive and refuses non-clones, mapped/active/local-busy ZVOLs, and clones that still have snapshots.
+- Disable snapshot deletion in the UI while dependent clones exist and explain what must be removed first.
+- Keep automatic clone naming while making the next generated clone name visible in the create-clone form.
 </CHANGES>
 
 <FILE Run="/bin/bash">
