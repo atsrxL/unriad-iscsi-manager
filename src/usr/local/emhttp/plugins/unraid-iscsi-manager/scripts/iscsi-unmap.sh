@@ -28,7 +28,7 @@ get_value() {
   mapped_backstore "$backstore" || fail "backstore is not mapped by the current LIO configuration: $backstore"
 
   output="$(targetcli "$backstore" get attribute emulate_tpu 2>&1)" || fail "$output"
-  value="$(sed -nE 's/.*emulate_tpu[[:space:]]*=[[:space:]]*['\"']?([01]).*/\1/p' <<< "$output" | tail -n1)"
+  value="$(grep -Eo 'emulate_tpu[[:space:]]*=[[:space:]]*[01]' <<< "$output" | tail -n1 | grep -Eo '[01]$' || true)"
   [[ "$value" == "0" || "$value" == "1" ]] || fail "could not read emulate_tpu for $backstore: $output"
   printf '%s\n' "$value"
 }
