@@ -35,11 +35,12 @@ jobs:
             bash -n "$file"
           done < <(find src scripts -type f -name '*.sh' -print0)
 
-      - name: Smoke test tabs and active-session parser
+      - name: Smoke test tabs, sessions, and auto-UNMAP policy
         run: |
           set -euo pipefail
           parent='src/usr/local/emhttp/plugins/unraid-iscsi-manager/unraid-iscsi-manager.page'
           sessions='src/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-sessions.sh'
+          policy='src/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-unmap-policy.sh'
           grep -qx 'Type="xmenu"' "$parent"
           grep -qx 'Tabs="true"' "$parent"
 
@@ -72,6 +73,41 @@ jobs:
           echo 'iqn.1991-05.com.microsoft:win-game' > "$root/dynamic_sessions"
           PATH="/tmp/izm-test-bin:$PATH" TARGET_ISCSI_ROOT=/tmp/izm-config bash "$sessions" > /tmp/izm-dynamic.tsv
           grep -F $'dynamic\t\tiqn.1991-05.com.microsoft:win-game\tLOGGED_IN\tLOGGED_IN\t192.168.123.25\tTCP\t\t\trw\tiqn.2003-01.org.linux-iscsi.qnas.test\ttpg1' /tmp/izm-dynamic.tsv
+
+          # Auto-UNMAP must only touch mapped block backstores that resolve to
+          # ZVOLs and are not already reporting UNMAP=on.
+          mkdir -p /tmp/izm-policy
+          cat > /tmp/izm-policy/map.sh <<'EOF'
+          #!/bin/bash
+          printf '%s\n' \
+            $'iqn.test\ttpg1\tLun0\t/backstores/block/iscsi\t/dev/zvol/tank/games\tdefault_tg_pt_gp\ttank/games\toff' \
+            $'iqn.test\ttpg1\tLun1\t/backstores/block/rawdisk\t/dev/sdb\tdefault_tg_pt_gp\t\toff' \
+            $'iqn.test\ttpg1\tLun2\t/backstores/block/ready\t/dev/zvol/tank/ready\tdefault_tg_pt_gp\ttank/ready\ton'
+          EOF
+          cat > /tmp/izm-policy/unmap.sh <<'EOF'
+          #!/bin/bash
+          printf '%s\n' "$*" >> /tmp/izm-policy/calls
+          EOF
+          chmod +x /tmp/izm-policy/map.sh /tmp/izm-policy/unmap.sh
+          echo 'AUTO_UNMAP=1' > /tmp/izm-policy/settings.cfg
+          : > /tmp/izm-policy/calls
+          IZM_MAP_SCRIPT=/tmp/izm-policy/map.sh \
+          IZM_UNMAP_SCRIPT=/tmp/izm-policy/unmap.sh \
+          IZM_CONFIG_FILE=/tmp/izm-policy/settings.cfg \
+          IZM_UNMAP_LOCK=/tmp/izm-policy/lock \
+          bash "$policy"
+          grep -Fx 'set /backstores/block/iscsi on' /tmp/izm-policy/calls
+          test "$(wc -l < /tmp/izm-policy/calls)" -eq 1
+
+          # Disabled policy must perform no mutation.
+          echo 'AUTO_UNMAP=0' > /tmp/izm-policy/settings.cfg
+          : > /tmp/izm-policy/calls
+          IZM_MAP_SCRIPT=/tmp/izm-policy/map.sh \
+          IZM_UNMAP_SCRIPT=/tmp/izm-policy/unmap.sh \
+          IZM_CONFIG_FILE=/tmp/izm-policy/settings.cfg \
+          IZM_UNMAP_LOCK=/tmp/izm-policy/lock2 \
+          bash "$policy"
+          test ! -s /tmp/izm-policy/calls
 
       - name: Build plugin assets
         run: bash ./scripts/build-release.sh
