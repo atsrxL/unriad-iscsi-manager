@@ -12,12 +12,27 @@ https://github.com/atsrxL/unriad-iscsi-manager/releases/latest/download/unraid-i
 
 Then open **Settings → iSCSI ZVOL Manager**.
 
+## WebGUI pages
+
+The plugin is split into four native Unraid tabs:
+
+1. **Z Status** — ZPOOL status, ZVOL properties, and configured LIO iSCSI IQN/LUN mappings.
+2. **ZVOL Creator** — create thin/thick ZVOLs with compression and volblocksize controls.
+3. **Snapshot Manager** — create/delete snapshots and clone snapshots with automatic or custom names.
+4. **Snapshot Refresher** — use one ZVOL as the new base and safely refresh selected same-pool targets.
+
+The Z Status page reads LIO configfs directly from `/sys/kernel/config/target/iscsi` and correlates block backstores with `/dev/zvol/...` devices. A displayed **Mapped** state means a LUN is configured under an IQN; it does not by itself prove that an initiator currently has an active session.
+
 ## V1 features
 
 - Create ZVOLs on a selected ZFS pool.
 - Thin (sparse) or thick (reserved) provisioning.
 - LZ4 compression on/off.
 - `volblocksize`: 4K, 8K, 16K, 32K, 64K, 128K.
+- Z Status:
+  - ZPOOL size, allocated/free space, and health;
+  - ZVOL size, used space, provisioning mode, compression, block size, and origin;
+  - IQN → LUN → LIO backstore → ZVOL mapping view.
 - Snapshot manager:
   - create snapshot;
   - delete snapshot, with dependent-clone protection;
@@ -31,11 +46,11 @@ Then open **Settings → iSCSI ZVOL Manager**.
   - rename old targets to timestamped backup names;
   - recreate the original target names as CoW clones of the new source snapshot;
   - attempt automatic rollback of a target rename if cloning fails.
-- Best-effort `targetcli` / `fuser` checks to catch active exports or users before refresh.
+- Best-effort `targetcli` / `fuser` checks to catch exported or busy devices before refresh.
 
 ## Important safety notes
 
-This plugin manages block devices. Before Refresh/Rebase, disconnect the source and all selected target LUNs from every iSCSI initiator and target mapping.
+This plugin manages block devices. Before Refresh/Rebase, disconnect the source and all selected target LUNs from every iSCSI initiator and take/remove the relevant target mapping as required by your target setup.
 
 The busy check is intentionally only an additional guard. Different iSCSI target implementations can expose their state differently, so the plugin cannot guarantee that every active LUN is detectable.
 
@@ -69,4 +84,4 @@ Pushing a release-related change to `main` runs the GitHub Actions workflow and 
 
 ## Current scope / roadmap
 
-V1 focuses on safe ZFS lifecycle operations. Good next steps are direct integration with the specific Unraid iSCSI target plugin, explicit LUN session discovery/offline handling, backup cleanup/retention, promote-to-base, and cross-pool replication.
+The next logical step is deeper integration with the specific Unraid iSCSI target plugin: active-session discovery, offline/unmap → refresh → remap orchestration, backup retention/cleanup, promote-to-base, and cross-pool replication.
