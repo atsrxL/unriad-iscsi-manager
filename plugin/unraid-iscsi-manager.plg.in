@@ -25,12 +25,12 @@
 
 <CHANGES>
 ### @VERSION@
-- Detect demo-mode/dynamic-ACL iSCSI logins directly from LIO configfs dynamic_sessions when targetcli omits them.
-- Correlate dynamic sessions with all LUNs in the matching target portal group and show initiator IQN plus a best-effort client IP.
-- Add a targetcli fallback when reading the LIO emulate_tpu / SCSI UNMAP setting.
-- Clarify Snapshot Manager space accounting: Unique Used versus Referenced Data.
-- Show ZVOL Referenced alongside ZFS Used to make guest discard/reclaim behavior easier to verify.
-- Keep the existing native Unraid multi-tab UI, ZPOOL TRIM controls, and safe Snapshot Refresher behavior.
+- Add a Misc tab for LIO / client-side maintenance settings.
+- Add a safe per-backstore SCSI UNMAP switch using LIO emulate_tpu=0/1.
+- Restrict the switch to currently mapped block backstores and verify the live value after each change.
+- Add Windows instructions for reconnecting the iSCSI disk and running Optimize-Volume -ReTrim or defrag /L.
+- Explain how ZVOL Referenced, snapshot Unique Used, guest UNMAP, and zpool trim relate to one another.
+- Keep dynamic-session detection, ZPOOL TRIM controls, and the native Unraid multi-tab UI from the previous release.
 </CHANGES>
 
 <FILE Run="/bin/bash">
