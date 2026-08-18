@@ -14,6 +14,7 @@ initiator=""
 declare -a maps=()
 declare -a conns=()
 sep=$'\x1f'
+address_re='^address:[[:space:]]+([^[:space:]]+)[[:space:]]+\(([^)]*)\)[[:space:]]+cid:[[:space:]]+[0-9]+[[:space:]]+connection-state:[[:space:]]+([^[:space:]]+)'
 
 reset_session() {
   sid=""
@@ -71,7 +72,7 @@ while IFS= read -r line; do
     continue
   fi
 
-  if [[ "$trimmed" =~ ^address:[[:space:]]([^[:space:]]+)[[:space:]]\(([^)]*)\)[[:space:]]cid:[[:space:]][0-9]+[[:space:]]connection-state:[[:space:]]([^[:space:]]+) ]]; then
+  if [[ "$trimmed" =~ $address_re ]]; then
     conns+=("${BASH_REMATCH[1]}${sep}${BASH_REMATCH[2]}${sep}${BASH_REMATCH[3]}")
     continue
   fi
