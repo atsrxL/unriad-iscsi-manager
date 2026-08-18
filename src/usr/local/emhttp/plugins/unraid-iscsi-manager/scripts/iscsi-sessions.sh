@@ -103,17 +103,13 @@ peer_ips_for_tpg() {
   while IFS= read -r endpoint; do
     [[ -n "$endpoint" ]] || continue
     ip="${endpoint%:*}"
-    ip="${ip#[}"
-    ip="${ip%]}"
+    ip="${ip#\[}"
+    ip="${ip%\]}"
     peers+=("$ip")
   done < <(
-    ss -Htn state established 2>/dev/null | awk -v ports="$(IFS='|'; echo "${ports[*]}")" '
-      BEGIN { n=split(ports,p,"|") }
-      {
-        for (i=1; i<=n; i++) {
-          if ($4 ~ (":" p[i] "$") ) { print $5; break }
-        }
-      }' | sort -u
+    for port in "${ports[@]}"; do
+      ss -Htn state established "( sport = :$port )" 2>/dev/null | awk '{print $NF}'
+    done | sort -u
   )
 
   printf '%s\n' "${peers[@]}"
