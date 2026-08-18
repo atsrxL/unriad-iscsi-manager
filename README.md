@@ -18,7 +18,7 @@ The plugin is split into five native Unraid tabs:
 
 1. **Z Status** — ZPOOL status, ZVOL properties, configured LIO mappings, active iSCSI sessions, and pool TRIM controls.
 2. **ZVOL Creator** — create thin/thick ZVOLs with compression and volblocksize controls.
-3. **Snapshot Manager** — create/delete snapshots and clone snapshots with automatic or custom names.
+3. **Snapshot Manager** — create/delete snapshots, view snapshot → clone dependencies, create clones, and safely delete clones.
 4. **Snapshot Refresher** — use one ZVOL as the new base and safely refresh selected same-pool targets.
 5. **Misc** — automatic/per-backstore SCSI UNMAP controls and Windows space-reclaim instructions.
 
@@ -47,10 +47,14 @@ The page also reports LIO `emulate_tpu` as **UNMAP on/off** and checks the ZVOL 
   - manual pool TRIM run/resume, suspend, cancel, and autotrim on/off.
 - Snapshot manager:
   - create snapshot;
-  - delete snapshot, with dependent-clone protection;
+  - show snapshots as parent nodes with their direct dependent clones underneath;
+  - show clone size, used space, origin, and iSCSI state;
+  - delete snapshot, with dependent-clone protection and a disabled delete action while clones exist;
   - clone snapshot;
-  - automatic `-clone1`, `-clone2`, ... naming;
+  - automatic `-clone1`, `-clone2`, ... naming with the next generated name shown in the form;
   - custom clone leaf name;
+  - safely delete clones with non-recursive `zfs destroy`;
+  - refuse clone deletion when the target is not actually a clone, is mapped/active/local-busy, or still has snapshots;
   - separate **Unique Used** and **Referenced Data** accounting.
 - Refresh / rebase workflow:
   - select one current ZVOL as source;
@@ -97,11 +101,13 @@ This plugin manages block devices. Before Refresh/Rebase, disconnect the source 
 
 The mapping removal requirement is intentional: the refresher renames the old ZVOL and creates a new block device at the original dataset name. An existing LIO block backstore can remain attached to the old device after the rename, so leaving the mapping configured could cause the IQN to continue serving the backup instead of the newly created clone.
 
+Clone deletion is deliberately conservative: it never uses recursive destroy. A clone that is iSCSI mapped, actively connected, locally busy, or has snapshots is rejected rather than cascading through dependencies.
+
 The Misc UNMAP controls only change LIO's `emulate_tpu` attribute. They do **not** run `blkdiscard` and do not discard an entire ZVOL.
 
 V1 only refreshes ZVOLs within the same ZFS pool. Cross-pool replication is intentionally left for a future `zfs send | zfs receive` implementation.
 
-The plugin does **not** expose a ZVOL-delete action in V1. Removing a snapshot with dependent clones is also blocked rather than using dangerous recursive `zfs destroy -R` behavior.
+The plugin does **not** expose a general-purpose ZVOL-delete action in V1. Removing a snapshot with dependent clones is also blocked rather than using dangerous recursive `zfs destroy -R` behavior.
 
 ## ZFS model
 
