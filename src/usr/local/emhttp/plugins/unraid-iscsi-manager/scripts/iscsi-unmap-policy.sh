@@ -24,7 +24,16 @@ policy_enabled || exit 0
 exec 9>"$LOCK_FILE"
 flock -n 9 || exit 0
 
-while IFS=$'\t' read -r _iqn _tpg _lun backstore _device _alua zvol unmap; do
+# Do not parse TSV with `IFS=$'\t' read a b ...`: tab is IFS whitespace, so
+# adjacent tabs can collapse and shift an empty ZVOL field into the next
+# column. Extract the exact fields with cut so non-ZVOL block devices can
+# never be mistaken for ZVOLs.
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  backstore="$(printf '%s\n' "$line" | cut -f4)"
+  zvol="$(printf '%s\n' "$line" | cut -f7)"
+  unmap="$(printf '%s\n' "$line" | cut -f8)"
+
   [[ -n "$zvol" ]] || continue
   [[ "$backstore" == /backstores/block/* ]] || continue
   [[ "$unmap" == "on" ]] && continue
