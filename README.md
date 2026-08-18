@@ -16,12 +16,21 @@ Then open **Settings → iSCSI ZVOL Manager**.
 
 The plugin is split into four native Unraid tabs:
 
-1. **Z Status** — ZPOOL status, ZVOL properties, and configured LIO iSCSI IQN/LUN mappings.
+1. **Z Status** — ZPOOL status, ZVOL properties, configured LIO mappings, active iSCSI sessions, and pool TRIM controls.
 2. **ZVOL Creator** — create thin/thick ZVOLs with compression and volblocksize controls.
 3. **Snapshot Manager** — create/delete snapshots and clone snapshots with automatic or custom names.
 4. **Snapshot Refresher** — use one ZVOL as the new base and safely refresh selected same-pool targets.
 
-The Z Status page reads LIO configfs directly from `/sys/kernel/config/target/iscsi` and correlates block backstores with `/dev/zvol/...` devices. A displayed **Mapped** state means a LUN is configured under an IQN; it does not by itself prove that an initiator currently has an active session.
+## Z Status / iSCSI visibility
+
+Configured LUN mappings are read from Linux LIO configfs under `/sys/kernel/config/target/iscsi`. Live sessions are read separately from `targetcli sessions detail`, so the UI can distinguish:
+
+- **Mapped / Offline** — an IQN/LUN/backstore exists but no initiator is currently logged in;
+- **Connected** — an open LIO session is present.
+
+For active sessions Z Status displays SID, target IQN/LUN, ZVOL, initiator IQN, initiator IP, session state, connection state, transport, and access mode.
+
+The page also reports LIO `emulate_tpu` as **UNMAP on/off** and checks the ZVOL block device's Linux discard capability.
 
 ## V1 features
 
@@ -30,9 +39,11 @@ The Z Status page reads LIO configfs directly from `/sys/kernel/config/target/is
 - LZ4 compression on/off.
 - `volblocksize`: 4K, 8K, 16K, 32K, 64K, 128K.
 - Z Status:
-  - ZPOOL size, allocated/free space, and health;
-  - ZVOL size, used space, provisioning mode, compression, block size, and origin;
-  - IQN → LUN → LIO backstore → ZVOL mapping view.
+  - ZPOOL size, allocated/free space, health, and autotrim;
+  - ZVOL size, used space, provisioning mode, compression, block size, origin, and discard support;
+  - IQN → LUN → LIO backstore → ZVOL mapping view;
+  - active initiator/session/IP/login-state view;
+  - manual pool TRIM run/resume, suspend, cancel, and autotrim on/off.
 - Snapshot manager:
   - create snapshot;
   - delete snapshot, with dependent-clone protection;
@@ -46,13 +57,22 @@ The Z Status page reads LIO configfs directly from `/sys/kernel/config/target/is
   - rename old targets to timestamped backup names;
   - recreate the original target names as CoW clones of the new source snapshot;
   - attempt automatic rollback of a target rename if cloning fails.
-- Best-effort `targetcli` / `fuser` checks to catch exported or busy devices before refresh.
+
+## TRIM / space reclaim semantics
+
+There are two separate discard layers:
+
+- **Inside a ZVOL:** deleting a file in NTFS/ext4 only marks filesystem blocks free. ZFS does not know those logical blocks are unused until the consumer sends discard/TRIM/SCSI UNMAP. For Windows iSCSI volumes, use ReTrim (for example `Optimize-Volume -DriveLetter X -ReTrim -Verbose`) when the storage path advertises UNMAP.
+- **At the ZPOOL layer:** `zpool trim <pool>` informs the physical SSD/thin backing devices about ZFS pool extents that are already free. It does not discover free blocks inside NTFS/ext4 by itself.
+- **Snapshots:** there is no meaningful snapshot TRIM operation. Snapshots intentionally pin old blocks. Deleting unneeded snapshots is what allows those blocks to become free in the pool.
+
+A thick ZVOL may still reserve capacity through `refreservation` even after guest discard reduces referenced data.
 
 ## Important safety notes
 
-This plugin manages block devices. Before Refresh/Rebase, disconnect the source and all selected target LUNs from every iSCSI initiator and take/remove the relevant target mapping as required by your target setup.
+This plugin manages block devices. Before Refresh/Rebase, disconnect the source and target initiators and remove their LIO mappings.
 
-The busy check is intentionally only an additional guard. Different iSCSI target implementations can expose their state differently, so the plugin cannot guarantee that every active LUN is detectable.
+The mapping removal requirement is intentional: the refresher renames the old ZVOL and creates a new block device at the original dataset name. An existing LIO block backstore can remain attached to the old device after the rename, so leaving the mapping configured could cause the IQN to continue serving the backup instead of the newly created clone.
 
 V1 only refreshes ZVOLs within the same ZFS pool. Cross-pool replication is intentionally left for a future `zfs send | zfs receive` implementation.
 
@@ -84,4 +104,4 @@ Pushing a release-related change to `main` runs the GitHub Actions workflow and 
 
 ## Current scope / roadmap
 
-The next logical step is deeper integration with the specific Unraid iSCSI target plugin: active-session discovery, offline/unmap → refresh → remap orchestration, backup retention/cleanup, promote-to-base, and cross-pool replication.
+The next logical step is direct LIO orchestration for safe offline/unmap → refresh → backstore remap, backup retention/cleanup, promote-to-base, and cross-pool replication.
