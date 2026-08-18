@@ -74,11 +74,12 @@ $csrf = izm_csrf();
 
   <div class="izm-card">
     <div class="izm-title">Snapshots — <code><?=izm_h($selected)?></code></div>
+    <div class="izm-sub"><strong>Unique Used</strong> is the space uniquely pinned by that snapshot and is the useful number for “how much would deleting this snapshot free?”. <strong>Referenced Data</strong> is the total data visible from the snapshot and is not the snapshot's extra disk usage.</div>
     <?php if (empty($snapshots)): ?>
       <div class="izm-sub">No snapshots found for this ZVOL.</div>
     <?php else: ?>
     <table class="izm-table">
-      <thead><tr><th>Snapshot</th><th>Created</th><th>Used</th><th>Referenced</th><th>Clone</th><th>Delete</th></tr></thead>
+      <thead><tr><th>Snapshot</th><th>Created</th><th>Unique Used</th><th>Referenced Data</th><th>Clone</th><th>Delete</th></tr></thead>
       <tbody>
       <?php foreach ($snapshots as $s): ?>
         <tr>
