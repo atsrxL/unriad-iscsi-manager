@@ -66,6 +66,15 @@ volume_leaf() {
   printf '%s\n' "${1##*/}"
 }
 
+volume_is_iscsi_mapped() {
+  local volume="$1" mapped_zvol
+  [[ -f "$ISCSI_MAP_SCRIPT" ]] || return 1
+  while IFS=$'\t' read -r _iqn _tpg _lun _backstore _device _alua mapped_zvol _unmap; do
+    [[ "$mapped_zvol" == "$volume" ]] && return 0
+  done < <(bash "$ISCSI_MAP_SCRIPT" 2>/dev/null || true)
+  return 1
+}
+
 volume_has_active_iscsi_session() {
   local volume="$1" sessions backstore
   [[ -f "$ISCSI_MAP_SCRIPT" && -f "$ISCSI_SESSIONS_SCRIPT" ]] || return 1
@@ -86,9 +95,10 @@ volume_has_active_iscsi_session() {
 is_busy_or_exported() {
   local volume="$1" dev="/dev/zvol/$1"
 
-  # A configured LUN is not necessarily busy. Only block refresh when LIO
-  # reports an active session for the ZVOL's backstore.
-  if volume_has_active_iscsi_session "$volume"; then
+  # Refresh renames the old ZVOL and creates a new block device at the old
+  # dataset name. A configured LIO backstore remains attached to the old block
+  # device, so even an offline mapping must be removed before refresh.
+  if volume_has_active_iscsi_session "$volume" || volume_is_iscsi_mapped "$volume"; then
     return 0
   fi
 
@@ -318,12 +328,12 @@ cmd_refresh() {
     target_pool="$(volume_pool "$target")"
     [[ "$target_pool" == "$pool" ]] || fail "cross-pool refresh is not supported in V1: $target"
     if is_busy_or_exported "$target"; then
-      fail "target has an active iSCSI session or local user: $target"
+      fail "target is iSCSI mapped/active or locally busy; remove its LIO mapping before refresh: $target"
     fi
   done
 
   if is_busy_or_exported "$source"; then
-    fail "source has an active iSCSI session or local user; disconnect it before creating a refresh base: $source"
+    fail "source is iSCSI mapped/active or locally busy; remove its LIO mapping before creating a refresh base: $source"
   fi
 
   snapshot_name="$(next_snapshot_name "$source" refresh)"
@@ -353,8 +363,12 @@ cmd_busy() {
   require_zfs
   local volume="${1:-}"
   volume_exists "$volume" || fail "volume does not exist: $volume"
-  if is_busy_or_exported "$volume"; then
-    echo "busy"
+  if volume_has_active_iscsi_session "$volume"; then
+    echo "active-session"
+  elif volume_is_iscsi_mapped "$volume"; then
+    echo "mapped"
+  elif command -v fuser >/dev/null 2>&1 && [[ -e "/dev/zvol/$volume" ]] && fuser "/dev/zvol/$volume" >/dev/null 2>&1; then
+    echo "local-busy"
   else
     echo "clear"
   fi
