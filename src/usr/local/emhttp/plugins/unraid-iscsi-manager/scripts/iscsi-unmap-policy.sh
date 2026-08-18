@@ -2,8 +2,8 @@
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-MAP_SCRIPT="$SCRIPT_DIR/iscsi-map.sh"
-UNMAP_SCRIPT="$SCRIPT_DIR/iscsi-unmap.sh"
+MAP_SCRIPT="${IZM_MAP_SCRIPT:-$SCRIPT_DIR/iscsi-map.sh}"
+UNMAP_SCRIPT="${IZM_UNMAP_SCRIPT:-$SCRIPT_DIR/iscsi-unmap.sh}"
 CONFIG_DIR="${IZM_CONFIG_DIR:-/boot/config/plugins/unraid-iscsi-manager}"
 CONFIG_FILE="${IZM_CONFIG_FILE:-$CONFIG_DIR/settings.cfg}"
 LOCK_FILE="${IZM_UNMAP_LOCK:-/var/run/unraid-iscsi-manager-unmap.lock}"
