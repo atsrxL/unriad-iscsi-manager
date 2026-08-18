@@ -6,23 +6,58 @@ Tag="fa-dashboard"
 <?php
 require_once '/usr/local/emhttp/plugins/unraid-iscsi-manager/include/common.php';
 
+$message = '';
+$error = '';
 [$zfsAvailable, $zfsOutput] = izm_zfs_state();
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
+    $action = $_POST['action'] ?? '';
+    $pool = trim($_POST['pool'] ?? '');
+    $args = [];
+
+    if ($action === 'pool_trim') {
+        $trimAction = $_POST['trim_action'] ?? 'start';
+        $args = ['pool-trim', $pool, $trimAction];
+    } elseif ($action === 'set_autotrim') {
+        $value = $_POST['autotrim'] ?? '';
+        $args = ['set-autotrim', $pool, $value];
+    }
+
+    if (!empty($args)) {
+        [$ret, $output] = izm_run($args);
+        if ($ret === 0) $message = $output ?: 'Operation completed.';
+        else $error = preg_replace('/^ERROR:\s*/m', '', $output ?: 'Operation failed.');
+    }
+}
+
 $pools = $zfsAvailable ? izm_load_pools() : [];
+$poolTrim = $zfsAvailable ? izm_load_pool_trim_info() : [];
 $volumes = $zfsAvailable ? izm_load_volumes() : [];
+$discardInfo = $zfsAvailable ? izm_load_volume_discard_info() : [];
 $mappings = $zfsAvailable ? izm_load_iscsi_mappings() : [];
 $mappedByZvol = izm_mappings_by_zvol($mappings);
+$sessions = $zfsAvailable ? izm_load_iscsi_sessions($mappings) : [];
+$sessionsByZvol = izm_sessions_by_zvol($sessions);
+
 $iqnGroups = [];
 foreach ($mappings as $mapping) {
     if ($mapping['iqn'] === '') continue;
     $iqnGroups[$mapping['iqn']][] = $mapping;
 }
 
+$sessionsByBackstore = [];
+foreach ($sessions as $session) {
+    $backstore = $session['backstore'] ?? '';
+    if ($backstore !== '') $sessionsByBackstore[$backstore][] = $session;
+}
+
 izm_styles();
+$csrf = izm_csrf();
 ?>
 <div class="izm-wrap">
   <h2>Z Status</h2>
-  <div class="izm-sub">Overview of ZFS pools, ZVOLs, and the LIO iSCSI IQN/LUN mappings currently configured on this Unraid host.</div>
-  <?php izm_notices('', '', $zfsAvailable, $zfsOutput); ?>
+  <div class="izm-sub">ZFS pool/ZVOL state plus configured LIO mappings and real-time iSCSI sessions reported by <code>targetcli sessions detail</code>.</div>
+  <?php izm_notices($message, $error, $zfsAvailable, $zfsOutput); ?>
 
   <?php if ($zfsAvailable): ?>
   <div class="izm-card">
@@ -31,15 +66,39 @@ izm_styles();
       <div class="izm-sub">No ZFS pools found.</div>
     <?php else: ?>
     <table class="izm-table">
-      <thead><tr><th>Pool</th><th>Size</th><th>Allocated</th><th>Free</th><th>Health</th></tr></thead>
+      <thead><tr><th>Pool</th><th>Size</th><th>Allocated</th><th>Free</th><th>Health</th><th>Autotrim</th><th>TRIM</th></tr></thead>
       <tbody>
-      <?php foreach ($pools as $p): ?>
+      <?php foreach ($pools as $p): $auto = $poolTrim[$p['name']]['autotrim'] ?? 'unknown'; ?>
         <tr>
           <td><code><?=izm_h($p['name'])?></code></td>
           <td><?=izm_h(izm_bytes($p['size']))?></td>
           <td><?=izm_h(izm_bytes($p['alloc']))?></td>
           <td><?=izm_h(izm_bytes($p['free']))?></td>
           <td><span class="izm-pill <?=strtoupper($p['health']) === 'ONLINE' ? 'izm-pill-ok' : 'izm-pill-warn'?>"><?=izm_h($p['health'])?></span></td>
+          <td>
+            <form method="post" class="izm-actions">
+              <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+              <input type="hidden" name="action" value="set_autotrim">
+              <input type="hidden" name="pool" value="<?=izm_h($p['name'])?>">
+              <select name="autotrim" onchange="this.form.submit()">
+                <option value="off" <?=$auto === 'off' ? 'selected' : ''?>>Off</option>
+                <option value="on" <?=$auto === 'on' ? 'selected' : ''?>>On</option>
+              </select>
+            </form>
+          </td>
+          <td>
+            <div class="izm-actions">
+              <?php foreach ([['start','Run / Resume'], ['suspend','Suspend'], ['cancel','Cancel']] as $ta): ?>
+              <form method="post">
+                <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+                <input type="hidden" name="action" value="pool_trim">
+                <input type="hidden" name="pool" value="<?=izm_h($p['name'])?>">
+                <input type="hidden" name="trim_action" value="<?=izm_h($ta[0])?>">
+                <input type="submit" value="<?=izm_h($ta[1])?>" <?=$ta[0] === 'start' ? 'onclick="return confirm(\'Start or resume manual TRIM for this pool?\');"' : ''?>>
+              </form>
+              <?php endforeach; ?>
+            </div>
+          </td>
         </tr>
       <?php endforeach; ?>
       </tbody>
@@ -53,9 +112,13 @@ izm_styles();
       <div class="izm-sub">No ZVOLs found.</div>
     <?php else: ?>
     <table class="izm-table">
-      <thead><tr><th>Name</th><th>Pool</th><th>Size</th><th>Used</th><th>Provision</th><th>Compression</th><th>Block</th><th>Origin</th><th>iSCSI</th></tr></thead>
+      <thead><tr><th>Name</th><th>Pool</th><th>Size</th><th>Used</th><th>Provision</th><th>Compression</th><th>Block</th><th>Origin</th><th>Discard</th><th>iSCSI</th></tr></thead>
       <tbody>
-      <?php foreach ($volumes as $v): $vmaps = $mappedByZvol[$v['name']] ?? []; ?>
+      <?php foreach ($volumes as $v):
+        $vmaps = $mappedByZvol[$v['name']] ?? [];
+        $vsessions = $sessionsByZvol[$v['name']] ?? [];
+        $di = $discardInfo[$v['name']] ?? ['supported' => 'unknown', 'max' => '', 'granularity' => ''];
+      ?>
         <tr>
           <td><code><?=izm_h($v['name'])?></code></td>
           <td><?=izm_h($v['pool'])?></td>
@@ -66,12 +129,25 @@ izm_styles();
           <td><?=izm_h(izm_block($v['volblocksize']))?></td>
           <td><?=($v['origin'] === '' || $v['origin'] === '-') ? '—' : '<code>'.izm_h($v['origin']).'</code>'?></td>
           <td>
-            <?php if (empty($vmaps)): ?>—
-            <?php else: ?>
-              <?php foreach ($vmaps as $m): ?>
-                <div><span class="izm-pill izm-pill-ok">Mapped</span> <span class="izm-small"><?=izm_h($m['iqn'])?> / <?=izm_h($m['lun'])?></span></div>
+            <?php if ($di['supported'] === 'yes'): ?>
+              <span class="izm-pill izm-pill-ok">Supported</span>
+              <?php if ($di['max'] !== ''): ?><div class="izm-small">max <?=izm_h(izm_bytes($di['max']))?></div><?php endif; ?>
+            <?php elseif ($di['supported'] === 'no'): ?>
+              <span class="izm-pill izm-pill-warn">No discard</span>
+            <?php else: ?>—<?php endif; ?>
+          </td>
+          <td>
+            <?php if (!empty($vsessions)): ?>
+              <span class="izm-pill izm-pill-live">Connected</span>
+              <?php foreach ($vsessions as $s): ?>
+                <div class="izm-small"><?=izm_h($s['address'] ?: 'unknown IP')?> · <?=izm_h($s['initiator'])?></div>
               <?php endforeach; ?>
-            <?php endif; ?>
+            <?php elseif (!empty($vmaps)): ?>
+              <span class="izm-pill izm-pill-ok">Mapped / Offline</span>
+              <?php foreach ($vmaps as $m): ?>
+                <div class="izm-small"><?=izm_h($m['iqn'])?> / <?=izm_h($m['lun'])?></div>
+              <?php endforeach; ?>
+            <?php else: ?>—<?php endif; ?>
           </td>
         </tr>
       <?php endforeach; ?>
@@ -81,26 +157,68 @@ izm_styles();
   </div>
 
   <div class="izm-card">
+    <div class="izm-title">Active Sessions</div>
+    <div class="izm-sub">Only currently open LIO sessions are listed here. A configured LUN with no session remains “Mapped / Offline”.</div>
+    <?php if (empty($sessions)): ?>
+      <div class="izm-sub">No open iSCSI sessions reported by targetcli.</div>
+    <?php else: ?>
+      <table class="izm-table">
+        <thead><tr><th>SID</th><th>Target / LUN</th><th>ZVOL</th><th>Initiator IQN</th><th>Initiator IP</th><th>Session</th><th>Connection</th><th>Mode</th></tr></thead>
+        <tbody>
+        <?php foreach ($sessions as $s): ?>
+          <tr>
+            <td><?=izm_h($s['sid'])?></td>
+            <td><code><?=izm_h($s['targetIqn'] ?: 'unknown target')?></code><div class="izm-small"><?=izm_h($s['targetLun'] ?: ('mapped-lun '.$s['mappedLun']))?></div></td>
+            <td><?=($s['zvol'] ?? '') !== '' ? '<code>'.izm_h($s['zvol']).'</code>' : izm_h($s['backstore'])?></td>
+            <td><code><?=izm_h($s['initiator'])?></code></td>
+            <td><?=izm_h($s['address'] ?: 'unknown')?><div class="izm-small"><?=izm_h($s['transport'])?></div></td>
+            <td><span class="izm-pill izm-pill-live"><?=izm_h($s['sessionState'] ?: 'open')?></span></td>
+            <td><?=izm_h($s['connectionState'] ?: 'unknown')?></td>
+            <td><?=izm_h($s['mode'])?></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+  </div>
+
+  <div class="izm-card">
     <div class="izm-title">LUNs</div>
-    <div class="izm-sub">Configured LIO target mappings. “Mapped” means the LUN is attached to an IQN; it does not necessarily mean an initiator currently has an active session.</div>
+    <div class="izm-sub">Configured LIO target mappings, with live login state and SCSI UNMAP advertisement where available.</div>
     <?php if (empty($iqnGroups)): ?>
       <div class="izm-sub">No IQN/LUN mappings detected under <code>/sys/kernel/config/target/iscsi</code>.</div>
     <?php else: ?>
       <div class="izm-lun-tree">
       <?php foreach ($iqnGroups as $iqn => $items): ?>
         <div class="izm-iqn"><span class="izm-dot">●</span><code><?=izm_h($iqn)?></code></div>
-        <?php $hasLun = false; foreach ($items as $m): if ($m['lun'] === '') continue; $hasLun = true; ?>
+        <?php $hasLun = false; foreach ($items as $m): if ($m['lun'] === '') continue; $hasLun = true; $live = $sessionsByBackstore[$m['backstore']] ?? []; ?>
           <div class="izm-lun-row">
             <div><strong><?=izm_h($m['lun'])?></strong></div>
             <div>→ <code><?=izm_h($m['backstore'])?></code></div>
             <div class="izm-lun-device"><?php if ($m['zvol'] !== ''): ?><code><?=izm_h($m['zvol'])?></code><?php else: ?><?=izm_h($m['device'] ?: 'unknown device')?><?php endif; ?></div>
-            <div class="izm-small">alua <?=izm_h($m['alua'] ?: 'default_tg_pt_gp')?></div>
+            <div>
+              <?php if (!empty($live)): ?>
+                <span class="izm-pill izm-pill-live">Connected</span>
+                <?php foreach ($live as $s): ?><div class="izm-small"><?=izm_h($s['address'])?> · <?=izm_h($s['initiator'])?></div><?php endforeach; ?>
+              <?php else: ?>
+                <span class="izm-pill">Offline</span>
+              <?php endif; ?>
+              <div class="izm-small">ALUA <?=izm_h($m['alua'] ?: 'default_tg_pt_gp')?> · UNMAP <?=izm_h($m['unmap'] ?: 'unknown')?></div>
+            </div>
           </div>
         <?php endforeach; ?>
         <?php if (!$hasLun): ?><div class="izm-lun-row"><div class="izm-small">No LUNs configured</div></div><?php endif; ?>
       <?php endforeach; ?>
       </div>
     <?php endif; ?>
+  </div>
+
+  <div class="izm-card">
+    <div class="izm-title">Space Reclaim / TRIM</div>
+    <div class="izm-sub">There are two different discard layers. Pool TRIM works on free ZFS pool extents and sends TRIM to the physical SSDs. ZVOL reclaim must originate inside the filesystem using the ZVOL, normally as SCSI UNMAP from the iSCSI initiator.</div>
+    <div class="izm-warn"><strong>ZVOL:</strong> deleting a file in NTFS/ext4 only marks blocks free inside that filesystem. ZFS cannot know those blocks are free until the client sends discard/UNMAP. On Windows you can run <span class="izm-code">Optimize-Volume -DriveLetter X -ReTrim -Verbose</span> (or <span class="izm-code">defrag X: /L</span>). The LIO mapping should show <strong>UNMAP on</strong> and the ZVOL should show <strong>Discard Supported</strong> above.</div>
+    <div class="izm-warn"><strong>Snapshots:</strong> there is no safe “snapshot TRIM”. A snapshot intentionally pins the old blocks. Delete snapshots you no longer need; only then can those blocks become free in the pool. Running <code>zpool trim</code> afterwards informs the physical SSD of newly free pool space.</div>
+    <div class="izm-sub">For a Thick ZVOL, <code>refreservation</code> can continue reserving capacity for that volume even after guest discard reduces referenced data. Pool TRIM improves the underlying SSD/thin-device free-block knowledge; it does not remove that reservation.</div>
   </div>
   <?php endif; ?>
 </div>
