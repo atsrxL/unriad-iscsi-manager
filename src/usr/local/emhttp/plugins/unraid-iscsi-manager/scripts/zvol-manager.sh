@@ -1,6 +1,10 @@
 #!/bin/bash
 set -Eeuo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ISCSI_MAP_SCRIPT="$SCRIPT_DIR/iscsi-map.sh"
+ISCSI_SESSIONS_SCRIPT="$SCRIPT_DIR/iscsi-sessions.sh"
+
 ZFS_BIN="${ZFS_BIN:-/sbin/zfs}"
 ZPOOL_BIN="${ZPOOL_BIN:-/sbin/zpool}"
 [[ -x "$ZFS_BIN" ]] || ZFS_BIN="$(command -v zfs || true)"
@@ -62,14 +66,30 @@ volume_leaf() {
   printf '%s\n' "${1##*/}"
 }
 
-is_busy_or_exported() {
-  local volume="$1" dev="/dev/zvol/$1" output
+volume_has_active_iscsi_session() {
+  local volume="$1" sessions backstore
+  [[ -f "$ISCSI_MAP_SCRIPT" && -f "$ISCSI_SESSIONS_SCRIPT" ]] || return 1
 
-  if command -v targetcli >/dev/null 2>&1; then
-    output="$(targetcli ls 2>/dev/null || true)"
-    if grep -Fq -- "$dev" <<< "$output"; then
+  sessions="$(bash "$ISCSI_SESSIONS_SCRIPT" 2>/dev/null || true)"
+  [[ -n "$sessions" ]] || return 1
+
+  while IFS=$'\t' read -r _iqn _tpg _lun backstore _device _alua mapped_zvol _unmap; do
+    [[ "$mapped_zvol" == "$volume" && -n "$backstore" ]] || continue
+    if awk -F '\t' -v bs="$backstore" '$9 == bs { found=1 } END { exit(found ? 0 : 1) }' <<< "$sessions"; then
       return 0
     fi
+  done < <(bash "$ISCSI_MAP_SCRIPT" 2>/dev/null || true)
+
+  return 1
+}
+
+is_busy_or_exported() {
+  local volume="$1" dev="/dev/zvol/$1"
+
+  # A configured LUN is not necessarily busy. Only block refresh when LIO
+  # reports an active session for the ZVOL's backstore.
+  if volume_has_active_iscsi_session "$volume"; then
+    return 0
   fi
 
   if command -v fuser >/dev/null 2>&1 && [[ -e "$dev" ]]; then
@@ -124,9 +144,77 @@ cmd_pools() {
   "$ZPOOL_BIN" list -H -p -o name,size,alloc,free,health
 }
 
+cmd_pool_trim_info() {
+  require_zfs
+  local pool autotrim
+  while IFS= read -r pool; do
+    [[ -n "$pool" ]] || continue
+    autotrim="$("$ZPOOL_BIN" get -H -o value autotrim "$pool" 2>/dev/null || echo unknown)"
+    printf '%s\t%s\n' "$pool" "$autotrim"
+  done < <("$ZPOOL_BIN" list -H -o name)
+}
+
+cmd_pool_trim() {
+  require_zfs
+  local pool="${1:-}" action="${2:-start}"
+  valid_component "$pool" || fail "invalid pool name"
+  pool_exists "$pool" || fail "pool does not exist: $pool"
+
+  case "$action" in
+    start|resume)
+      "$ZPOOL_BIN" trim "$pool"
+      echo "TRIM started/resumed for $pool"
+      ;;
+    suspend)
+      "$ZPOOL_BIN" trim -s "$pool"
+      echo "TRIM suspended for $pool"
+      ;;
+    cancel)
+      "$ZPOOL_BIN" trim -c "$pool"
+      echo "TRIM cancelled for $pool"
+      ;;
+    *) fail "trim action must be start, resume, suspend, or cancel" ;;
+  esac
+}
+
+cmd_set_autotrim() {
+  require_zfs
+  local pool="${1:-}" value="${2:-}"
+  valid_component "$pool" || fail "invalid pool name"
+  pool_exists "$pool" || fail "pool does not exist: $pool"
+  [[ "$value" == "on" || "$value" == "off" ]] || fail "autotrim must be on or off"
+  "$ZPOOL_BIN" set "autotrim=$value" "$pool"
+  echo "autotrim=$value on $pool"
+}
+
 cmd_volumes() {
   require_zfs
   "$ZFS_BIN" list -H -p -t volume -o name,volsize,used,refer,compression,volblocksize,refreservation,origin
+}
+
+cmd_volume_discard_info() {
+  require_zfs
+  local volume dev real block queue max gran supported
+  while IFS= read -r volume; do
+    [[ -n "$volume" ]] || continue
+    dev="/dev/zvol/$volume"
+    real="$(readlink -f -- "$dev" 2>/dev/null || true)"
+    block="${real##*/}"
+    queue="/sys/class/block/$block/queue"
+    max=""
+    gran=""
+    supported="unknown"
+
+    if [[ -n "$block" && -r "$queue/discard_max_bytes" ]]; then
+      max="$(cat "$queue/discard_max_bytes" 2>/dev/null || echo 0)"
+      gran="$(cat "$queue/discard_granularity" 2>/dev/null || echo 0)"
+      if [[ "$max" =~ ^[0-9]+$ ]]; then
+        if (( max > 0 )); then supported="yes"; else supported="no"; fi
+      fi
+    fi
+
+    printf '%s\t%s\t%s\t%s\n' "$volume" "$supported" "$max" "$gran"
+  done < <("$ZFS_BIN" list -H -t volume -o name)
 }
 
 cmd_snapshots() {
@@ -230,12 +318,12 @@ cmd_refresh() {
     target_pool="$(volume_pool "$target")"
     [[ "$target_pool" == "$pool" ]] || fail "cross-pool refresh is not supported in V1: $target"
     if is_busy_or_exported "$target"; then
-      fail "target appears busy or exported via iSCSI: $target"
+      fail "target has an active iSCSI session or local user: $target"
     fi
   done
 
   if is_busy_or_exported "$source"; then
-    fail "source appears busy or exported via iSCSI; disconnect it before creating a refresh base: $source"
+    fail "source has an active iSCSI session or local user; disconnect it before creating a refresh base: $source"
   fi
 
   snapshot_name="$(next_snapshot_name "$source" refresh)"
@@ -276,7 +364,11 @@ usage() {
   cat <<'USAGE'
 Usage:
   zvol-manager.sh pools
+  zvol-manager.sh pool-trim-info
+  zvol-manager.sh pool-trim <pool> <start|resume|suspend|cancel>
+  zvol-manager.sh set-autotrim <pool> <on|off>
   zvol-manager.sh volumes
+  zvol-manager.sh volume-discard-info
   zvol-manager.sh snapshots <zvol>
   zvol-manager.sh create-volume <pool> <name> <size> <thin|thick> <on|off> <4K|8K|16K|32K|64K|128K>
   zvol-manager.sh create-snapshot <zvol> [name]
@@ -289,7 +381,11 @@ USAGE
 
 case "${1:-}" in
   pools) shift; cmd_pools "$@" ;;
+  pool-trim-info) shift; cmd_pool_trim_info "$@" ;;
+  pool-trim) shift; cmd_pool_trim "$@" ;;
+  set-autotrim) shift; cmd_set_autotrim "$@" ;;
   volumes) shift; cmd_volumes "$@" ;;
+  volume-discard-info) shift; cmd_volume_discard_info "$@" ;;
   snapshots) shift; cmd_snapshots "$@" ;;
   create-volume) shift; cmd_create_volume "$@" ;;
   create-snapshot) shift; cmd_create_snapshot "$@" ;;
