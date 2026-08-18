@@ -1,0 +1,403 @@
+Menu="OtherSettings"
+Title="iSCSI ZVOL Manager"
+Icon="database"
+---
+<?php
+
+define('IZM_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/zvol-manager.sh');
+
+function izm_h($value) {
+    return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+}
+
+function izm_run(array $args) {
+    $cmd = 'bash ' . escapeshellarg(IZM_SCRIPT);
+    foreach ($args as $arg) {
+        $cmd .= ' ' . escapeshellarg((string)$arg);
+    }
+    $cmd .= ' 2>&1';
+    $out = [];
+    $ret = 0;
+    exec($cmd, $out, $ret);
+    return [$ret, trim(implode("\n", $out))];
+}
+
+function izm_rows(array $args, $columns) {
+    [$ret, $output] = izm_run($args);
+    if ($ret !== 0 || $output === '') return [];
+    $rows = [];
+    foreach (preg_split('/\R/', $output) as $line) {
+        if ($line === '') continue;
+        $parts = explode("\t", $line);
+        $parts = array_pad($parts, $columns, '');
+        $rows[] = array_slice($parts, 0, $columns);
+    }
+    return $rows;
+}
+
+function izm_bytes($value) {
+    if (!is_numeric($value)) return (string)$value;
+    $n = (float)$value;
+    $units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
+    $i = 0;
+    while ($n >= 1024 && $i < count($units) - 1) {
+        $n /= 1024;
+        $i++;
+    }
+    if ($i === 0) return number_format($n, 0) . ' ' . $units[$i];
+    $digits = $n >= 100 ? 0 : ($n >= 10 ? 1 : 2);
+    return number_format($n, $digits) . ' ' . $units[$i];
+}
+
+function izm_block($value) {
+    if (!is_numeric($value)) return (string)$value;
+    $n = (int)$value;
+    if ($n >= 1024 && $n % 1024 === 0) return ($n / 1024) . 'K';
+    return (string)$n;
+}
+
+function izm_creation($value) {
+    if (ctype_digit((string)$value)) return date('Y-m-d H:i:s', (int)$value);
+    return (string)$value;
+}
+
+function izm_load_pools() {
+    $rows = izm_rows(['pools'], 5);
+    $out = [];
+    foreach ($rows as $row) {
+        [$name, $size, $alloc, $free, $health] = $row;
+        $out[] = compact('name', 'size', 'alloc', 'free', 'health');
+    }
+    return $out;
+}
+
+function izm_load_volumes() {
+    $rows = izm_rows(['volumes'], 8);
+    $out = [];
+    foreach ($rows as $row) {
+        [$name, $volsize, $used, $refer, $compression, $volblocksize, $refreservation, $origin] = $row;
+        $pool = explode('/', $name, 2)[0];
+        $provision = ($origin !== '' && $origin !== '-') ? 'Clone' : ((is_numeric($refreservation) && (int)$refreservation > 0) ? 'Thick' : 'Thin');
+        $out[] = compact('name', 'pool', 'volsize', 'used', 'refer', 'compression', 'volblocksize', 'refreservation', 'origin', 'provision');
+    }
+    return $out;
+}
+
+function izm_load_snapshots($volume) {
+    if ($volume === '') return [];
+    $rows = izm_rows(['snapshots', $volume], 4);
+    $out = [];
+    foreach ($rows as $row) {
+        [$name, $creation, $used, $refer] = $row;
+        $out[] = compact('name', 'creation', 'used', 'refer');
+    }
+    return $out;
+}
+
+$message = '';
+$error = '';
+
+[$zfsCheck, $zfsCheckOutput] = izm_run(['pools']);
+$zfsAvailable = ($zfsCheck === 0);
+
+$pools = $zfsAvailable ? izm_load_pools() : [];
+$volumes = $zfsAvailable ? izm_load_volumes() : [];
+
+$requestedVolume = trim($_GET['zvol'] ?? $_POST['selected_zvol'] ?? '');
+$volumeNames = array_column($volumes, 'name');
+if ($requestedVolume === '' || !in_array($requestedVolume, $volumeNames, true)) {
+    $requestedVolume = $volumeNames[0] ?? '';
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
+    $action = $_POST['action'] ?? '';
+    $args = [];
+
+    if ($action === 'create_volume') {
+        $args = [
+            'create-volume',
+            trim($_POST['pool'] ?? ''),
+            trim($_POST['name'] ?? ''),
+            strtoupper(trim($_POST['size'] ?? '')),
+            $_POST['provisioning'] ?? 'thin',
+            isset($_POST['compression']) ? 'on' : 'off',
+            $_POST['block'] ?? '16K',
+        ];
+    } elseif ($action === 'create_snapshot') {
+        $args = [
+            'create-snapshot',
+            trim($_POST['selected_zvol'] ?? ''),
+            trim($_POST['snapshot_name'] ?? ''),
+        ];
+    } elseif ($action === 'delete_snapshot') {
+        $args = ['delete-snapshot', trim($_POST['snapshot'] ?? '')];
+    } elseif ($action === 'clone_snapshot') {
+        $args = [
+            'clone-snapshot',
+            trim($_POST['snapshot'] ?? ''),
+            trim($_POST['clone_name'] ?? ''),
+        ];
+    } elseif ($action === 'refresh') {
+        $source = trim($_POST['source'] ?? '');
+        $targets = $_POST['targets'] ?? [];
+        if (!is_array($targets)) $targets = [];
+        $targets = array_values(array_filter(array_map('trim', $targets), fn($v) => $v !== ''));
+        if (!isset($_POST['offline_confirm'])) {
+            $error = 'Confirm that the source and target LUNs are disconnected before refresh.';
+        } else {
+            $args = array_merge(['refresh', $source], $targets);
+        }
+    }
+
+    if ($error === '' && !empty($args)) {
+        [$ret, $output] = izm_run($args);
+        if ($ret === 0) {
+            $message = $output !== '' ? $output : 'Operation completed.';
+        } else {
+            $error = preg_replace('/^ERROR:\s*/m', '', $output ?: 'Operation failed.');
+        }
+
+        $pools = izm_load_pools();
+        $volumes = izm_load_volumes();
+        $volumeNames = array_column($volumes, 'name');
+        $requestedVolume = trim($_POST['selected_zvol'] ?? $_POST['source'] ?? $requestedVolume);
+        if (!in_array($requestedVolume, $volumeNames, true)) {
+            $requestedVolume = $volumeNames[0] ?? '';
+        }
+    }
+}
+
+$snapshots = $zfsAvailable ? izm_load_snapshots($requestedVolume) : [];
+$csrf = izm_h($var['csrf_token'] ?? '');
+?>
+
+<style>
+.izm-wrap { max-width: 1500px; }
+.izm-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:16px; margin:16px 0; }
+.izm-card { border:1px solid rgba(127,127,127,.35); border-radius:8px; padding:16px; margin:16px 0; background:rgba(127,127,127,.04); }
+.izm-title { font-size:18px; font-weight:600; margin-bottom:12px; }
+.izm-sub { opacity:.75; margin:-6px 0 14px; line-height:1.5; }
+.izm-row { display:flex; flex-wrap:wrap; gap:10px 14px; align-items:flex-end; margin:10px 0; }
+.izm-field { display:flex; flex-direction:column; gap:5px; min-width:150px; flex:1; }
+.izm-field label { font-weight:600; }
+.izm-field input[type=text], .izm-field select { width:100%; box-sizing:border-box; }
+.izm-table { width:100%; border-collapse:collapse; }
+.izm-table th, .izm-table td { padding:8px 10px; border-bottom:1px solid rgba(127,127,127,.25); text-align:left; vertical-align:middle; }
+.izm-table th { font-weight:600; }
+.izm-table code { white-space:nowrap; }
+.izm-ok, .izm-err, .izm-warn { white-space:pre-wrap; border-radius:6px; padding:11px 13px; margin:12px 0; }
+.izm-ok { background:rgba(40,167,69,.13); border:1px solid rgba(40,167,69,.35); }
+.izm-err { background:rgba(220,53,69,.13); border:1px solid rgba(220,53,69,.35); }
+.izm-warn { background:rgba(255,193,7,.13); border:1px solid rgba(255,193,7,.35); }
+.izm-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.izm-small { font-size:12px; opacity:.75; }
+.izm-targets { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:8px; margin:12px 0; }
+.izm-target { padding:9px 10px; border:1px solid rgba(127,127,127,.25); border-radius:5px; }
+.izm-target.disabled { opacity:.38; }
+.izm-pill { display:inline-block; border:1px solid rgba(127,127,127,.35); border-radius:999px; padding:2px 7px; font-size:12px; }
+@media (max-width:700px) { .izm-table { display:block; overflow-x:auto; } }
+</style>
+
+<div class="izm-wrap">
+  <h2>iSCSI ZVOL Manager</h2>
+  <div class="izm-sub">Create and manage ZFS volumes used as iSCSI LUN backstores. ZFS remains the source of truth; this plugin does not maintain a separate relationship database.</div>
+
+  <?php if (!$zfsAvailable): ?>
+    <div class="izm-err"><strong>ZFS is not available.</strong><br><?=izm_h($zfsCheckOutput ?: 'zfs/zpool commands were not found')?></div>
+  <?php else: ?>
+
+    <?php if ($message !== ''): ?><div class="izm-ok"><?=izm_h($message)?></div><?php endif; ?>
+    <?php if ($error !== ''): ?><div class="izm-err"><?=izm_h($error)?></div><?php endif; ?>
+
+    <div class="izm-card">
+      <div class="izm-title">ZVOLs</div>
+      <?php if (empty($volumes)): ?>
+        <div class="izm-sub">No ZVOLs found.</div>
+      <?php else: ?>
+        <table class="izm-table">
+          <thead><tr><th>Name</th><th>Pool</th><th>Size</th><th>Used</th><th>Provision</th><th>Compression</th><th>Block</th><th>Origin</th></tr></thead>
+          <tbody>
+          <?php foreach ($volumes as $v): ?>
+            <tr>
+              <td><code><?=izm_h($v['name'])?></code></td>
+              <td><?=izm_h($v['pool'])?></td>
+              <td><?=izm_h(izm_bytes($v['volsize']))?></td>
+              <td><?=izm_h(izm_bytes($v['used']))?></td>
+              <td><span class="izm-pill"><?=izm_h($v['provision'])?></span></td>
+              <td><?=izm_h($v['compression'])?></td>
+              <td><?=izm_h(izm_block($v['volblocksize']))?></td>
+              <td><?=($v['origin'] === '' || $v['origin'] === '-') ? '—' : '<code>'.izm_h($v['origin']).'</code>'?></td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+      <?php endif; ?>
+    </div>
+
+    <div class="izm-grid">
+      <div class="izm-card">
+        <div class="izm-title">Create ZVOL</div>
+        <div class="izm-sub">Select a ZFS pool. A ZVOL cannot be pinned to one physical disk inside a multi-device pool.</div>
+        <form method="post">
+          <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+          <input type="hidden" name="action" value="create_volume">
+          <div class="izm-row">
+            <div class="izm-field">
+              <label>Pool</label>
+              <select name="pool" required>
+                <?php foreach ($pools as $p): ?>
+                  <option value="<?=izm_h($p['name'])?>"><?=izm_h($p['name'])?> — <?=izm_h(izm_bytes($p['free']))?> free — <?=izm_h($p['health'])?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+            <div class="izm-field">
+              <label>Name</label>
+              <input type="text" name="name" placeholder="games/base" required pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]*">
+            </div>
+            <div class="izm-field" style="max-width:150px">
+              <label>Size</label>
+              <input type="text" name="size" placeholder="1T" required pattern="[1-9][0-9]*[KkMmGgTtPp]?">
+            </div>
+          </div>
+          <div class="izm-row">
+            <div class="izm-field">
+              <label>Provisioning</label>
+              <select name="provisioning"><option value="thin">Thin / sparse</option><option value="thick">Thick / reserved</option></select>
+            </div>
+            <div class="izm-field">
+              <label>Volblocksize</label>
+              <select name="block"><option>4K</option><option>8K</option><option selected>16K</option><option>32K</option><option>64K</option><option>128K</option></select>
+            </div>
+            <label style="padding-bottom:7px"><input type="checkbox" name="compression" checked> LZ4 compression</label>
+          </div>
+          <input type="submit" value="Create ZVOL" onclick="return confirm('Create this ZVOL?');">
+        </form>
+      </div>
+
+      <div class="izm-card">
+        <div class="izm-title">Pool status</div>
+        <table class="izm-table">
+          <thead><tr><th>Pool</th><th>Size</th><th>Allocated</th><th>Free</th><th>Health</th></tr></thead>
+          <tbody>
+          <?php foreach ($pools as $p): ?>
+            <tr><td><code><?=izm_h($p['name'])?></code></td><td><?=izm_h(izm_bytes($p['size']))?></td><td><?=izm_h(izm_bytes($p['alloc']))?></td><td><?=izm_h(izm_bytes($p['free']))?></td><td><?=izm_h($p['health'])?></td></tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="izm-card">
+      <div class="izm-title">Snapshot Manager</div>
+      <?php if (empty($volumes)): ?>
+        <div class="izm-sub">Create a ZVOL first.</div>
+      <?php else: ?>
+        <div class="izm-row">
+          <div class="izm-field" style="max-width:520px">
+            <label>ZVOL</label>
+            <select onchange="window.location.href=window.location.pathname+'?zvol='+encodeURIComponent(this.value)">
+              <?php foreach ($volumes as $v): ?><option value="<?=izm_h($v['name'])?>" <?=$v['name']===$requestedVolume?'selected':''?>><?=izm_h($v['name'])?></option><?php endforeach; ?>
+            </select>
+          </div>
+          <form method="post" class="izm-actions">
+            <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+            <input type="hidden" name="action" value="create_snapshot">
+            <input type="hidden" name="selected_zvol" value="<?=izm_h($requestedVolume)?>">
+            <input type="text" name="snapshot_name" placeholder="optional snapshot name">
+            <input type="submit" value="Create Snapshot">
+          </form>
+        </div>
+
+        <?php if (empty($snapshots)): ?>
+          <div class="izm-sub">No snapshots for this ZVOL.</div>
+        <?php else: ?>
+          <table class="izm-table">
+            <thead><tr><th>Snapshot</th><th>Created</th><th>Used</th><th>Referenced</th><th>Clone</th><th>Delete</th></tr></thead>
+            <tbody>
+            <?php foreach ($snapshots as $s): ?>
+              <tr>
+                <td><code><?=izm_h($s['name'])?></code></td>
+                <td><?=izm_h(izm_creation($s['creation']))?></td>
+                <td><?=izm_h(izm_bytes($s['used']))?></td>
+                <td><?=izm_h(izm_bytes($s['refer']))?></td>
+                <td>
+                  <form method="post" class="izm-actions">
+                    <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+                    <input type="hidden" name="action" value="clone_snapshot">
+                    <input type="hidden" name="selected_zvol" value="<?=izm_h($requestedVolume)?>">
+                    <input type="hidden" name="snapshot" value="<?=izm_h($s['name'])?>">
+                    <input type="text" name="clone_name" placeholder="blank = clone1/2/..." style="width:170px">
+                    <input type="submit" value="Clone">
+                  </form>
+                </td>
+                <td>
+                  <form method="post">
+                    <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+                    <input type="hidden" name="action" value="delete_snapshot">
+                    <input type="hidden" name="selected_zvol" value="<?=izm_h($requestedVolume)?>">
+                    <input type="hidden" name="snapshot" value="<?=izm_h($s['name'])?>">
+                    <input type="submit" value="Delete" onclick="return confirm('Delete snapshot <?=izm_h($s['name'])?>? Dependent clones will block deletion.');">
+                  </form>
+                </td>
+              </tr>
+            <?php endforeach; ?>
+            </tbody>
+          </table>
+        <?php endif; ?>
+      <?php endif; ?>
+    </div>
+
+    <div class="izm-card">
+      <div class="izm-title">Refresh / Rebase ZVOLs</div>
+      <div class="izm-sub">Use the current state of one ZVOL as a new source snapshot, then refresh selected ZVOL names as new CoW clones. V1 supports same-pool refresh only.</div>
+      <div class="izm-warn"><strong>Safety:</strong> disconnect the source and every target LUN from iSCSI before running Refresh. The plugin performs best-effort targetcli/fuser checks, but it cannot reliably detect every target implementation.</div>
+      <?php if (count($volumes) < 2): ?>
+        <div class="izm-sub">At least two ZVOLs are required.</div>
+      <?php else: ?>
+        <form method="post" id="refreshForm">
+          <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+          <input type="hidden" name="action" value="refresh">
+          <div class="izm-field" style="max-width:620px">
+            <label>Source ZVOL</label>
+            <select name="source" id="refreshSource" onchange="izmUpdateTargets()">
+              <?php foreach ($volumes as $v): ?>
+                <option value="<?=izm_h($v['name'])?>" data-pool="<?=izm_h($v['pool'])?>" <?=$v['name']===$requestedVolume?'selected':''?>><?=izm_h($v['name'])?> (<?=izm_h($v['pool'])?>)</option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+
+          <div class="izm-targets">
+            <?php foreach ($volumes as $v): ?>
+              <label class="izm-target" data-volume="<?=izm_h($v['name'])?>" data-pool="<?=izm_h($v['pool'])?>">
+                <input type="checkbox" name="targets[]" value="<?=izm_h($v['name'])?>"> <code><?=izm_h($v['name'])?></code>
+                <span class="izm-small"> — <?=izm_h($v['provision'])?></span>
+              </label>
+            <?php endforeach; ?>
+          </div>
+
+          <label><input type="checkbox" name="offline_confirm" value="1" required> I have disconnected the source and selected target LUNs from iSCSI.</label>
+          <p class="izm-small">Safe refresh keeps each old target as <code>target-backup-YYYYMMDD-HHMMSS</code>. If the new clone fails, the plugin attempts to restore the old name automatically.</p>
+          <input type="submit" value="Refresh Selected" onclick="return confirm('Refresh selected ZVOLs from this source? Old targets will be renamed as backups.');">
+        </form>
+      <?php endif; ?>
+    </div>
+  <?php endif; ?>
+</div>
+
+<script>
+function izmUpdateTargets() {
+  const source = document.getElementById('refreshSource');
+  if (!source) return;
+  const selected = source.options[source.selectedIndex];
+  const sourceName = selected.value;
+  const sourcePool = selected.dataset.pool;
+  document.querySelectorAll('.izm-target').forEach(function(label) {
+    const checkbox = label.querySelector('input[type=checkbox]');
+    const allowed = label.dataset.pool === sourcePool && label.dataset.volume !== sourceName;
+    checkbox.disabled = !allowed;
+    if (!allowed) checkbox.checked = false;
+    label.classList.toggle('disabled', !allowed);
+  });
+}
+document.addEventListener('DOMContentLoaded', izmUpdateTargets);
+</script>
