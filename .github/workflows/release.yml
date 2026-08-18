@@ -35,6 +35,27 @@ jobs:
             bash -n "$file"
           done < <(find src scripts -type f -name '*.sh' -print0)
 
+      - name: Smoke test tabs and active-session parser
+        run: |
+          set -euo pipefail
+          parent='src/usr/local/emhttp/plugins/unraid-iscsi-manager/unraid-iscsi-manager.page'
+          grep -qx 'Type="xmenu"' "$parent"
+          grep -qx 'Tabs="true"' "$parent"
+
+          mkdir -p /tmp/izm-test-bin
+          cat > /tmp/izm-test-bin/targetcli <<'EOF'
+          #!/bin/bash
+          cat <<'OUT'
+          alias: WIN-GAME sid: 7 type: Normal session-state: LOGGED_IN
+              name: iqn.1991-05.com.microsoft:win-game
+              mapped-lun: 0 backstore: block/iscsi mode: rw
+              address: 192.168.123.25 (TCP)  cid: 0 connection-state: LOGGED_IN
+          OUT
+          EOF
+          chmod +x /tmp/izm-test-bin/targetcli
+          PATH="/tmp/izm-test-bin:$PATH" bash src/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-sessions.sh > /tmp/izm-sessions.tsv
+          grep -F $'7\tWIN-GAME\tiqn.1991-05.com.microsoft:win-game\tLOGGED_IN\tLOGGED_IN\t192.168.123.25\tTCP\t0\t/backstores/block/iscsi\trw' /tmp/izm-sessions.tsv
+
       - name: Build plugin assets
         run: bash ./scripts/build-release.sh
 
