@@ -55,7 +55,7 @@ unraid-iscsi-manager:role=volume|clone|backup
 ## Build locally
 
 ```bash
-./scripts/build-release.sh
+bash scripts/build-release.sh
 ```
 
 Artifacts are written to `dist/`:
