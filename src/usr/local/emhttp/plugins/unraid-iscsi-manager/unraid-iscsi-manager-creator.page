@@ -1,0 +1,89 @@
+Menu="unraid-iscsi-manager:20"
+Title="ZVOL Creator"
+Type="php"
+Tag="fa-plus-circle"
+---
+<?php
+require_once '/usr/local/emhttp/plugins/unraid-iscsi-manager/include/common.php';
+
+$message = '';
+$error = '';
+[$zfsAvailable, $zfsOutput] = izm_zfs_state();
+$pools = $zfsAvailable ? izm_load_pools() : [];
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
+    $args = [
+        'create-volume',
+        trim($_POST['pool'] ?? ''),
+        trim($_POST['name'] ?? ''),
+        strtoupper(trim($_POST['size'] ?? '')),
+        $_POST['provisioning'] ?? 'thin',
+        isset($_POST['compression']) ? 'on' : 'off',
+        $_POST['block'] ?? '16K',
+    ];
+    [$ret, $output] = izm_run($args);
+    if ($ret === 0) $message = $output ?: 'ZVOL created.';
+    else $error = preg_replace('/^ERROR:\s*/m', '', $output ?: 'Create failed.');
+    $pools = izm_load_pools();
+}
+
+izm_styles();
+$csrf = izm_csrf();
+?>
+<div class="izm-wrap">
+  <h2>ZVOL Creator</h2>
+  <div class="izm-sub">Create a ZVOL on a selected ZFS pool for later use as an iSCSI block backstore.</div>
+  <?php izm_notices($message, $error, $zfsAvailable, $zfsOutput); ?>
+
+  <?php if ($zfsAvailable): ?>
+  <div class="izm-card">
+    <div class="izm-title">Create ZVOL</div>
+    <div class="izm-sub">A ZVOL belongs to a ZFS pool. It cannot be pinned to one physical disk inside a multi-device pool.</div>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+      <div class="izm-row">
+        <div class="izm-field">
+          <label>Pool</label>
+          <select name="pool" required>
+            <?php foreach ($pools as $p): ?>
+              <option value="<?=izm_h($p['name'])?>"><?=izm_h($p['name'])?> — <?=izm_h(izm_bytes($p['free']))?> free — <?=izm_h($p['health'])?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="izm-field">
+          <label>Name</label>
+          <input type="text" name="name" placeholder="games/base" required pattern="[A-Za-z0-9][A-Za-z0-9_.:/-]*">
+        </div>
+        <div class="izm-field" style="max-width:150px">
+          <label>Size</label>
+          <input type="text" name="size" placeholder="1T" required pattern="[1-9][0-9]*[KkMmGgTtPp]?">
+        </div>
+      </div>
+      <div class="izm-row">
+        <div class="izm-field">
+          <label>Provisioning</label>
+          <select name="provisioning"><option value="thin">Thin / sparse</option><option value="thick">Thick / reserved</option></select>
+        </div>
+        <div class="izm-field">
+          <label>Volblocksize</label>
+          <select name="block"><option>4K</option><option>8K</option><option selected>16K</option><option>32K</option><option>64K</option><option>128K</option></select>
+        </div>
+        <label style="padding-bottom:7px"><input type="checkbox" name="compression" checked> LZ4 compression</label>
+      </div>
+      <input type="submit" value="Create ZVOL" onclick="return confirm('Create this ZVOL?');">
+    </form>
+  </div>
+
+  <div class="izm-card">
+    <div class="izm-title">Pool capacity</div>
+    <table class="izm-table">
+      <thead><tr><th>Pool</th><th>Size</th><th>Allocated</th><th>Free</th><th>Health</th></tr></thead>
+      <tbody>
+      <?php foreach ($pools as $p): ?>
+        <tr><td><code><?=izm_h($p['name'])?></code></td><td><?=izm_h(izm_bytes($p['size']))?></td><td><?=izm_h(izm_bytes($p['alloc']))?></td><td><?=izm_h(izm_bytes($p['free']))?></td><td><?=izm_h($p['health'])?></td></tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+  </div>
+  <?php endif; ?>
+</div>
