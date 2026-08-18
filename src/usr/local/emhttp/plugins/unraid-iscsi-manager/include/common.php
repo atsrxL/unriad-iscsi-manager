@@ -1,6 +1,7 @@
 <?php
 
 define('IZM_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/zvol-manager.sh');
+define('IZM_ISCSI_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-map.sh');
 
 function izm_h($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -93,10 +94,17 @@ function izm_load_snapshots($volume) {
 }
 
 function izm_load_iscsi_mappings() {
-    $rows = izm_rows(['iscsi-map'], 7);
+    $cmd = 'bash ' . escapeshellarg(IZM_ISCSI_SCRIPT) . ' 2>&1';
+    $lines = [];
+    $ret = 0;
+    exec($cmd, $lines, $ret);
+    if ($ret !== 0 || empty($lines)) return [];
+
     $out = [];
-    foreach ($rows as $row) {
-        [$iqn, $tpg, $lun, $backstore, $device, $alua, $zvol] = $row;
+    foreach ($lines as $line) {
+        if ($line === '') continue;
+        $row = array_pad(explode("\t", $line), 7, '');
+        [$iqn, $tpg, $lun, $backstore, $device, $alua, $zvol] = array_slice($row, 0, 7);
         $out[] = compact('iqn', 'tpg', 'lun', 'backstore', 'device', 'alua', 'zvol');
     }
     return $out;
