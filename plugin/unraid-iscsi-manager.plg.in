@@ -35,7 +35,7 @@
 
 <FILE Run="/bin/bash">
   <INLINE>
-    if ! command -v zfs >/dev/null 2>&1 || ! command -v zpool >/dev/null 2>&1; then
+    if ! command -v zfs >/dev/null 2&gt;&amp;1 || ! command -v zpool >/dev/null 2&gt;&amp;1; then
       echo "ZFS tools were not found. This plugin requires an Unraid system with ZFS support."
       exit 1
     fi
