@@ -25,12 +25,11 @@
 
 <CHANGES>
 ### @VERSION@
-- Initial V1 release with automated GitHub Release packaging and package MD5 verification.
-- Create ZVOLs with thin/thick provisioning, LZ4 compression toggle and 4K/8K/16K/32K/64K/128K volblocksize.
-- Snapshot creation/deletion with clone dependency protection.
-- Snapshot clone with automatic clone1/clone2 numbering or a custom name.
-- Same-pool multi-target Safe Refresh: source snapshot -> rename old targets as backups -> recreate target names as CoW clones.
-- Best-effort targetcli/fuser busy checks before refresh.
+- Split the WebGUI into four native Unraid tabs: Z Status, ZVOL Creator, Snapshot Manager, and Snapshot Refresher.
+- Add Z Status overview for ZFS pools and ZVOL properties.
+- Add LIO iSCSI IQN/LUN mapping discovery from configfs, including backstore, ZVOL, and ALUA group display.
+- Show mapped IQN/LUN associations directly beside each ZVOL.
+- Snapshot Refresher now highlights configured iSCSI mappings before refresh.
 </CHANGES>
 
 <FILE Run="/bin/bash">

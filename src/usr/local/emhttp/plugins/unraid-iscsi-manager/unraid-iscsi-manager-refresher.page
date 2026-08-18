@@ -1,0 +1,93 @@
+Menu="unraid-iscsi-manager:40"
+Title="Snapshot Refresher"
+Type="php"
+Tag="fa-refresh"
+---
+<?php
+require_once '/usr/local/emhttp/plugins/unraid-iscsi-manager/include/common.php';
+
+$message = '';
+$error = '';
+[$zfsAvailable, $zfsOutput] = izm_zfs_state();
+$volumes = $zfsAvailable ? izm_load_volumes() : [];
+$volumeNames = array_column($volumes, 'name');
+$source = trim($_GET['source'] ?? $_POST['source'] ?? '');
+if ($source === '' || !in_array($source, $volumeNames, true)) $source = $volumeNames[0] ?? '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
+    $targets = $_POST['targets'] ?? [];
+    if (!is_array($targets)) $targets = [];
+    $targets = array_values(array_filter(array_map('trim', $targets), fn($v) => $v !== ''));
+    if (!isset($_POST['offline_confirm'])) {
+        $error = 'Confirm that the source and all selected target LUNs are disconnected before refresh.';
+    } else {
+        [$ret, $output] = izm_run(array_merge(['refresh', $source], $targets));
+        if ($ret === 0) $message = $output ?: 'Refresh completed.';
+        else $error = preg_replace('/^ERROR:\s*/m', '', $output ?: 'Refresh failed.');
+        $volumes = izm_load_volumes();
+        $volumeNames = array_column($volumes, 'name');
+        if (!in_array($source, $volumeNames, true)) $source = $volumeNames[0] ?? '';
+    }
+}
+
+$sourcePool = $source !== '' ? explode('/', $source, 2)[0] : '';
+$targets = [];
+foreach ($volumes as $v) {
+    if ($v['name'] === $source || $v['pool'] !== $sourcePool) continue;
+    $targets[] = $v;
+}
+$mappings = $zfsAvailable ? izm_load_iscsi_mappings() : [];
+$mappedByZvol = izm_mappings_by_zvol($mappings);
+$sourceMapped = $source !== '' && !empty($mappedByZvol[$source]);
+
+izm_styles();
+$csrf = izm_csrf();
+?>
+<div class="izm-wrap">
+  <h2>Snapshot Refresher</h2>
+  <div class="izm-sub">Use the current state of one ZVOL as a new base and replace selected same-pool targets with CoW clones. Existing targets are retained as timestamped backup ZVOLs.</div>
+  <?php izm_notices($message, $error, $zfsAvailable, $zfsOutput); ?>
+
+  <?php if ($zfsAvailable): ?>
+  <div class="izm-warn"><strong>Safe Refresh behavior:</strong> source snapshot → rename each old target to <code>-backup-YYYYMMDD-HHMMSS</code> → clone the new snapshot back to the original target name. Configured iSCSI mappings are treated as busy by the V1 backend, so mapped/exported LUNs must be removed or taken offline before refresh.</div>
+
+  <div class="izm-card">
+    <form method="get" class="izm-field" style="max-width:700px">
+      <label>Source ZVOL</label>
+      <select name="source" onchange="this.form.submit()">
+        <?php foreach ($volumes as $v): ?>
+          <option value="<?=izm_h($v['name'])?>" <?=$v['name'] === $source ? 'selected' : ''?>><?=izm_h($v['name'])?> — <?=izm_h($v['pool'])?> — <?=izm_h(izm_bytes($v['volsize']))?></option>
+        <?php endforeach; ?>
+      </select>
+    </form>
+    <?php if ($sourceMapped): ?><div style="margin-top:12px"><span class="izm-pill izm-pill-warn">Source is currently iSCSI mapped — offline/unmap it before refresh</span></div><?php endif; ?>
+  </div>
+
+  <?php if ($source !== ''): ?>
+  <div class="izm-card">
+    <div class="izm-title">Refresh targets</div>
+    <div class="izm-sub">Source: <code><?=izm_h($source)?></code>. Only ZVOLs in pool <code><?=izm_h($sourcePool)?></code> are eligible.</div>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+      <input type="hidden" name="source" value="<?=izm_h($source)?>">
+      <?php if (empty($targets)): ?>
+        <div class="izm-sub">No other ZVOLs exist in this pool.</div>
+      <?php else: ?>
+        <div class="izm-targets">
+        <?php foreach ($targets as $v): $isMapped = !empty($mappedByZvol[$v['name']]); ?>
+          <label class="izm-target <?=$isMapped ? 'disabled' : ''?>">
+            <input type="checkbox" name="targets[]" value="<?=izm_h($v['name'])?>" <?=$isMapped ? 'disabled' : ''?>>
+            <strong><?=izm_h($v['name'])?></strong><br>
+            <span class="izm-small"><?=izm_h(izm_bytes($v['volsize']))?> · <?=izm_h($v['provision'])?></span>
+            <?php if ($isMapped): ?><br><span class="izm-pill izm-pill-warn">iSCSI mapped — offline first</span><?php endif; ?>
+          </label>
+        <?php endforeach; ?>
+        </div>
+        <label><input type="checkbox" name="offline_confirm" required> I confirm the source and selected target LUNs are disconnected/offline.</label>
+        <div style="margin-top:14px"><input type="submit" value="Refresh Selected" onclick="return confirm('Refresh selected targets from this source? Old targets will be retained as backup ZVOLs.');"></div>
+      <?php endif; ?>
+    </form>
+  </div>
+  <?php endif; ?>
+  <?php endif; ?>
+</div>

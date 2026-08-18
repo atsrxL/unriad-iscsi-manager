@@ -1,0 +1,106 @@
+Menu="unraid-iscsi-manager:10"
+Title="Z Status"
+Type="php"
+Tag="fa-dashboard"
+---
+<?php
+require_once '/usr/local/emhttp/plugins/unraid-iscsi-manager/include/common.php';
+
+[$zfsAvailable, $zfsOutput] = izm_zfs_state();
+$pools = $zfsAvailable ? izm_load_pools() : [];
+$volumes = $zfsAvailable ? izm_load_volumes() : [];
+$mappings = $zfsAvailable ? izm_load_iscsi_mappings() : [];
+$mappedByZvol = izm_mappings_by_zvol($mappings);
+$iqnGroups = [];
+foreach ($mappings as $mapping) {
+    if ($mapping['iqn'] === '') continue;
+    $iqnGroups[$mapping['iqn']][] = $mapping;
+}
+
+izm_styles();
+?>
+<div class="izm-wrap">
+  <h2>Z Status</h2>
+  <div class="izm-sub">Overview of ZFS pools, ZVOLs, and the LIO iSCSI IQN/LUN mappings currently configured on this Unraid host.</div>
+  <?php izm_notices('', '', $zfsAvailable, $zfsOutput); ?>
+
+  <?php if ($zfsAvailable): ?>
+  <div class="izm-card">
+    <div class="izm-title">ZPOOLs</div>
+    <?php if (empty($pools)): ?>
+      <div class="izm-sub">No ZFS pools found.</div>
+    <?php else: ?>
+    <table class="izm-table">
+      <thead><tr><th>Pool</th><th>Size</th><th>Allocated</th><th>Free</th><th>Health</th></tr></thead>
+      <tbody>
+      <?php foreach ($pools as $p): ?>
+        <tr>
+          <td><code><?=izm_h($p['name'])?></code></td>
+          <td><?=izm_h(izm_bytes($p['size']))?></td>
+          <td><?=izm_h(izm_bytes($p['alloc']))?></td>
+          <td><?=izm_h(izm_bytes($p['free']))?></td>
+          <td><span class="izm-pill <?=strtoupper($p['health']) === 'ONLINE' ? 'izm-pill-ok' : 'izm-pill-warn'?>"><?=izm_h($p['health'])?></span></td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+    <?php endif; ?>
+  </div>
+
+  <div class="izm-card">
+    <div class="izm-title">ZVOLs</div>
+    <?php if (empty($volumes)): ?>
+      <div class="izm-sub">No ZVOLs found.</div>
+    <?php else: ?>
+    <table class="izm-table">
+      <thead><tr><th>Name</th><th>Pool</th><th>Size</th><th>Used</th><th>Provision</th><th>Compression</th><th>Block</th><th>Origin</th><th>iSCSI</th></tr></thead>
+      <tbody>
+      <?php foreach ($volumes as $v): $vmaps = $mappedByZvol[$v['name']] ?? []; ?>
+        <tr>
+          <td><code><?=izm_h($v['name'])?></code></td>
+          <td><?=izm_h($v['pool'])?></td>
+          <td><?=izm_h(izm_bytes($v['volsize']))?></td>
+          <td><?=izm_h(izm_bytes($v['used']))?></td>
+          <td><span class="izm-pill"><?=izm_h($v['provision'])?></span></td>
+          <td><?=izm_h($v['compression'])?></td>
+          <td><?=izm_h(izm_block($v['volblocksize']))?></td>
+          <td><?=($v['origin'] === '' || $v['origin'] === '-') ? '—' : '<code>'.izm_h($v['origin']).'</code>'?></td>
+          <td>
+            <?php if (empty($vmaps)): ?>—
+            <?php else: ?>
+              <?php foreach ($vmaps as $m): ?>
+                <div><span class="izm-pill izm-pill-ok">Mapped</span> <span class="izm-small"><?=izm_h($m['iqn'])?> / <?=izm_h($m['lun'])?></span></div>
+              <?php endforeach; ?>
+            <?php endif; ?>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+    <?php endif; ?>
+  </div>
+
+  <div class="izm-card">
+    <div class="izm-title">LUNs</div>
+    <div class="izm-sub">Configured LIO target mappings. “Mapped” means the LUN is attached to an IQN; it does not necessarily mean an initiator currently has an active session.</div>
+    <?php if (empty($iqnGroups)): ?>
+      <div class="izm-sub">No IQN/LUN mappings detected under <code>/sys/kernel/config/target/iscsi</code>.</div>
+    <?php else: ?>
+      <div class="izm-lun-tree">
+      <?php foreach ($iqnGroups as $iqn => $items): ?>
+        <div class="izm-iqn"><span class="izm-dot">●</span><code><?=izm_h($iqn)?></code></div>
+        <?php $hasLun = false; foreach ($items as $m): if ($m['lun'] === '') continue; $hasLun = true; ?>
+          <div class="izm-lun-row">
+            <div><strong><?=izm_h($m['lun'])?></strong></div>
+            <div>→ <code><?=izm_h($m['backstore'])?></code></div>
+            <div class="izm-lun-device"><?php if ($m['zvol'] !== ''): ?><code><?=izm_h($m['zvol'])?></code><?php else: ?><?=izm_h($m['device'] ?: 'unknown device')?><?php endif; ?></div>
+            <div class="izm-small">alua <?=izm_h($m['alua'] ?: 'default_tg_pt_gp')?></div>
+          </div>
+        <?php endforeach; ?>
+        <?php if (!$hasLun): ?><div class="izm-lun-row"><div class="izm-small">No LUNs configured</div></div><?php endif; ?>
+      <?php endforeach; ?>
+      </div>
+    <?php endif; ?>
+  </div>
+  <?php endif; ?>
+</div>

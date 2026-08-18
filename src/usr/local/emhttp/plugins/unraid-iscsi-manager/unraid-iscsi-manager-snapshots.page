@@ -1,0 +1,116 @@
+Menu="unraid-iscsi-manager:30"
+Title="Snapshot Manager"
+Type="php"
+Tag="fa-camera"
+---
+<?php
+require_once '/usr/local/emhttp/plugins/unraid-iscsi-manager/include/common.php';
+
+$message = '';
+$error = '';
+[$zfsAvailable, $zfsOutput] = izm_zfs_state();
+$volumes = $zfsAvailable ? izm_load_volumes() : [];
+$volumeNames = array_column($volumes, 'name');
+$selected = trim($_GET['zvol'] ?? $_POST['selected_zvol'] ?? '');
+if ($selected === '' || !in_array($selected, $volumeNames, true)) $selected = $volumeNames[0] ?? '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
+    $action = $_POST['action'] ?? '';
+    $args = [];
+    if ($action === 'create_snapshot') {
+        $args = ['create-snapshot', $selected, trim($_POST['snapshot_name'] ?? '')];
+    } elseif ($action === 'delete_snapshot') {
+        $args = ['delete-snapshot', trim($_POST['snapshot'] ?? '')];
+    } elseif ($action === 'clone_snapshot') {
+        $args = ['clone-snapshot', trim($_POST['snapshot'] ?? ''), trim($_POST['clone_name'] ?? '')];
+    }
+    if (!empty($args)) {
+        [$ret, $output] = izm_run($args);
+        if ($ret === 0) $message = $output ?: 'Operation completed.';
+        else $error = preg_replace('/^ERROR:\s*/m', '', $output ?: 'Operation failed.');
+        $volumes = izm_load_volumes();
+        $volumeNames = array_column($volumes, 'name');
+        if (!in_array($selected, $volumeNames, true)) $selected = $volumeNames[0] ?? '';
+    }
+}
+
+$snapshots = ($zfsAvailable && $selected !== '') ? izm_load_snapshots($selected) : [];
+izm_styles();
+$csrf = izm_csrf();
+?>
+<div class="izm-wrap">
+  <h2>Snapshot Manager</h2>
+  <div class="izm-sub">Create, delete, and clone ZVOL snapshots. Snapshot deletion is blocked when dependent clones exist.</div>
+  <?php izm_notices($message, $error, $zfsAvailable, $zfsOutput); ?>
+
+  <?php if ($zfsAvailable): ?>
+  <div class="izm-card">
+    <div class="izm-row">
+      <form method="get" class="izm-field" style="max-width:620px">
+        <label>ZVOL</label>
+        <select name="zvol" onchange="this.form.submit()">
+          <?php foreach ($volumes as $v): ?>
+            <option value="<?=izm_h($v['name'])?>" <?=$v['name'] === $selected ? 'selected' : ''?>><?=izm_h($v['name'])?> — <?=izm_h(izm_bytes($v['volsize']))?></option>
+          <?php endforeach; ?>
+        </select>
+      </form>
+    </div>
+  </div>
+
+  <?php if ($selected !== ''): ?>
+  <div class="izm-card">
+    <div class="izm-title">Create snapshot</div>
+    <form method="post" class="izm-row">
+      <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+      <input type="hidden" name="action" value="create_snapshot">
+      <input type="hidden" name="selected_zvol" value="<?=izm_h($selected)?>">
+      <div class="izm-field" style="max-width:520px">
+        <label>Name <span class="izm-small">(blank = automatic manual-YYYYMMDD-HHMMSS)</span></label>
+        <input type="text" name="snapshot_name" placeholder="before-update">
+      </div>
+      <input type="submit" value="Create Snapshot">
+    </form>
+  </div>
+
+  <div class="izm-card">
+    <div class="izm-title">Snapshots — <code><?=izm_h($selected)?></code></div>
+    <?php if (empty($snapshots)): ?>
+      <div class="izm-sub">No snapshots found for this ZVOL.</div>
+    <?php else: ?>
+    <table class="izm-table">
+      <thead><tr><th>Snapshot</th><th>Created</th><th>Used</th><th>Referenced</th><th>Clone</th><th>Delete</th></tr></thead>
+      <tbody>
+      <?php foreach ($snapshots as $s): ?>
+        <tr>
+          <td><code><?=izm_h($s['name'])?></code></td>
+          <td><?=izm_h(izm_creation($s['creation']))?></td>
+          <td><?=izm_h(izm_bytes($s['used']))?></td>
+          <td><?=izm_h(izm_bytes($s['refer']))?></td>
+          <td>
+            <form method="post" class="izm-actions">
+              <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+              <input type="hidden" name="action" value="clone_snapshot">
+              <input type="hidden" name="selected_zvol" value="<?=izm_h($selected)?>">
+              <input type="hidden" name="snapshot" value="<?=izm_h($s['name'])?>">
+              <input type="text" name="clone_name" placeholder="blank = clone1, clone2…" style="max-width:210px">
+              <input type="submit" value="Clone">
+            </form>
+          </td>
+          <td>
+            <form method="post">
+              <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+              <input type="hidden" name="action" value="delete_snapshot">
+              <input type="hidden" name="selected_zvol" value="<?=izm_h($selected)?>">
+              <input type="hidden" name="snapshot" value="<?=izm_h($s['name'])?>">
+              <input type="submit" value="Delete" onclick="return confirm('Delete this snapshot? Dependent clones will prevent deletion.');">
+            </form>
+          </td>
+        </tr>
+      <?php endforeach; ?>
+      </tbody>
+    </table>
+    <?php endif; ?>
+  </div>
+  <?php endif; ?>
+  <?php endif; ?>
+</div>
