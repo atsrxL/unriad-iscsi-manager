@@ -1,0 +1,51 @@
+name: Build Unraid plugin release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'VERSION'
+      - 'src/**'
+      - 'plugin/**'
+      - 'scripts/build-release.sh'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: unraid-plugin-release
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build plugin assets
+        run: bash ./scripts/build-release.sh
+
+      - name: Validate generated plugin XML
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libxml2-utils
+          xmllint --noout dist/unraid-iscsi-manager.plg
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          TAG="$VERSION"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release delete "$TAG" --cleanup-tag -y
+          fi
+          gh release create "$TAG" \
+            dist/unraid-iscsi-manager.plg \
+            "dist/unraid-iscsi-manager-${VERSION}.txz" \
+            --target "$GITHUB_SHA" \
+            --title "iSCSI ZVOL Manager ${VERSION}" \
+            --notes "Automated Unraid plugin release for ${VERSION}. Install using the unraid-iscsi-manager.plg asset."
