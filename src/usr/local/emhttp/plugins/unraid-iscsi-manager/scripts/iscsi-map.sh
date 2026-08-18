@@ -59,7 +59,7 @@ backstore_device() {
   printf '%s\n' "$device"
 }
 
-root="/sys/kernel/config/target/iscsi"
+root="${TARGET_ISCSI_ROOT:-/sys/kernel/config/target/iscsi}"
 [[ -d "$root" ]] || exit 0
 
 shopt -s nullglob
