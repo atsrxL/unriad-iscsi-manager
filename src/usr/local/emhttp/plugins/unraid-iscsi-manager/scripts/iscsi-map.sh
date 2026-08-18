@@ -59,6 +59,18 @@ backstore_device() {
   printf '%s\n' "$device"
 }
 
+backstore_unmap() {
+  local target_dir="${1:-}" value=""
+  if [[ -r "$target_dir/attrib/emulate_tpu" ]]; then
+    value="$(tr -d '\r\n' < "$target_dir/attrib/emulate_tpu" 2>/dev/null || true)"
+    case "$value" in
+      1) echo "on" ; return 0 ;;
+      0) echo "off" ; return 0 ;;
+    esac
+  fi
+  echo "unknown"
+}
+
 root="${TARGET_ISCSI_ROOT:-/sys/kernel/config/target/iscsi}"
 [[ -d "$root" ]] || exit 0
 
@@ -83,6 +95,7 @@ for iqn_dir in "$root"/*; do
         backstore=""
         device=""
         zvol=""
+        unmap="unknown"
         alua="default_tg_pt_gp"
 
         if [[ -n "$target_dir" && -d "$target_dir" ]]; then
@@ -91,6 +104,7 @@ for iqn_dir in "$root"/*; do
           type="$(backstore_type_name "$core_type")"
           device="$(backstore_device "$target_dir" "$type" "$backstore")"
           zvol="$(zvol_for_device "$device")"
+          unmap="$(backstore_unmap "$target_dir")"
         fi
 
         if [[ -e "$lun_dir/alua_tg_pt_gp" ]]; then
@@ -100,12 +114,12 @@ for iqn_dir in "$root"/*; do
         fi
 
         [[ -n "$type" && -n "$backstore" ]] && backstore="/backstores/$type/$backstore"
-        printf '%s\t%s\tLun%s\t%s\t%s\t%s\t%s\n' "$iqn" "$tpg" "$lun_id" "$backstore" "$device" "$alua" "$zvol"
+        printf '%s\t%s\tLun%s\t%s\t%s\t%s\t%s\t%s\n' "$iqn" "$tpg" "$lun_id" "$backstore" "$device" "$alua" "$zvol" "$unmap"
       done
     fi
 
     if (( found_lun == 0 )); then
-      printf '%s\t%s\t\t\t\t\t\n' "$iqn" "$tpg"
+      printf '%s\t%s\t\t\t\t\t\t\n' "$iqn" "$tpg"
     fi
   done
 done
