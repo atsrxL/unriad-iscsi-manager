@@ -25,12 +25,12 @@
 
 <CHANGES>
 ### @VERSION@
-- Add a Misc tab for LIO / client-side maintenance settings.
-- Add a safe per-backstore SCSI UNMAP switch using LIO emulate_tpu=0/1.
-- Restrict the switch to currently mapped block backstores and verify the live value after each change.
-- Add Windows instructions for reconnecting the iSCSI disk and running Optimize-Volume -ReTrim or defrag /L.
-- Explain how ZVOL Referenced, snapshot Unique Used, guest UNMAP, and zpool trim relate to one another.
-- Keep dynamic-session detection, ZPOOL TRIM controls, and the native Unraid multi-tab UI from the previous release.
+- Add a persistent Auto-enable UNMAP policy in Misc, defaulting to Off.
+- When enabled, reconcile mapped LIO block backstores that resolve to ZVOLs and set emulate_tpu=1 when needed.
+- Check once per minute so ZVOL backstores created later by another iSCSI plugin are picked up automatically.
+- Ignore physical disks and block backstores that cannot be correlated to /dev/zvol/ devices.
+- Keep per-backstore manual UNMAP On/Off controls and Windows reconnect/ReTrim instructions.
+- Turning the automatic policy Off stops future enforcement without silently disabling already-enabled backstores.
 </CHANGES>
 
 <FILE Run="/bin/bash">
@@ -54,6 +54,22 @@
     rm -rf &emhttp;
     /sbin/installpkg &plugin;/packages/&name;-&version;.txz
     chmod +x &emhttp;/scripts/*.sh 2>/dev/null || true
+
+    mkdir -p &plugin;
+    if [[ ! -f &plugin;/settings.cfg ]]; then
+      echo 'AUTO_UNMAP=0' &gt; &plugin;/settings.cfg
+    fi
+
+    cat &gt; &plugin;/&name;.cron &lt;&lt;'CRON'
+* * * * * /bin/bash &emhttp;/scripts/iscsi-unmap-policy.sh &gt;/dev/null 2&gt;&amp;1
+CRON
+    chmod 0644 &plugin;/&name;.cron
+    /usr/local/sbin/update_cron 2>/dev/null || true
+
+    # Preserve an already-enabled policy across plugin upgrades and reconcile
+    # immediately instead of waiting for the next cron minute.
+    /bin/bash &emhttp;/scripts/iscsi-unmap-policy.sh &gt;/dev/null 2&gt;&amp;1 || true
+
     echo ""
     echo "iSCSI ZVOL Manager &version; installed."
     echo "Open Settings -> iSCSI ZVOL Manager."
@@ -64,6 +80,7 @@
   <INLINE>
     rm -rf &emhttp;
     rm -rf &plugin;
+    /usr/local/sbin/update_cron 2>/dev/null || true
     echo "iSCSI ZVOL Manager removed. ZVOLs and snapshots were not modified."
   </INLINE>
 </FILE>
