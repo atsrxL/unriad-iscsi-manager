@@ -6,71 +6,134 @@ Tag="fa-wrench"
 <?php
 require_once '/usr/local/emhttp/plugins/unraid-iscsi-manager/include/common.php';
 
+const IZM_CONFIG_DIR = '/boot/config/plugins/unraid-iscsi-manager';
+const IZM_CONFIG_FILE = IZM_CONFIG_DIR . '/settings.cfg';
+const IZM_UNMAP_SCRIPT = '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-unmap.sh';
+const IZM_UNMAP_POLICY_SCRIPT = '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-unmap-policy.sh';
+
+function izm_misc_backstores(array $mappings) {
+    $backstores = [];
+    foreach ($mappings as $mapping) {
+        $backstore = $mapping['backstore'] ?? '';
+        if ($backstore === '' || strpos($backstore, '/backstores/block/') !== 0) continue;
+        if (!isset($backstores[$backstore])) {
+            $backstores[$backstore] = [
+                'backstore' => $backstore,
+                'device' => $mapping['device'] ?? '',
+                'zvol' => $mapping['zvol'] ?? '',
+                'unmap' => $mapping['unmap'] ?? 'unknown',
+                'luns' => [],
+            ];
+        }
+        $backstores[$backstore]['luns'][] = [
+            'iqn' => $mapping['iqn'] ?? '',
+            'lun' => $mapping['lun'] ?? '',
+        ];
+        if (($mapping['unmap'] ?? '') !== '') $backstores[$backstore]['unmap'] = $mapping['unmap'];
+    }
+    return $backstores;
+}
+
+function izm_misc_auto_unmap() {
+    if (!is_file(IZM_CONFIG_FILE)) return false;
+    foreach (file(IZM_CONFIG_FILE, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        if (preg_match('/^AUTO_UNMAP=(.*)$/', trim($line), $m)) {
+            return in_array(strtolower(trim($m[1])), ['1', 'yes', 'on', 'true'], true);
+        }
+    }
+    return false;
+}
+
+function izm_misc_write_auto_unmap($enabled) {
+    if (!is_dir(IZM_CONFIG_DIR) && !mkdir(IZM_CONFIG_DIR, 0755, true) && !is_dir(IZM_CONFIG_DIR)) {
+        return false;
+    }
+
+    $lines = [];
+    if (is_file(IZM_CONFIG_FILE)) {
+        foreach (file(IZM_CONFIG_FILE, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+            if (!preg_match('/^AUTO_UNMAP=/', trim($line))) $lines[] = $line;
+        }
+    }
+    $lines[] = 'AUTO_UNMAP=' . ($enabled ? '1' : '0');
+
+    $tmp = IZM_CONFIG_FILE . '.tmp.' . getmypid();
+    if (file_put_contents($tmp, implode("\n", $lines) . "\n", LOCK_EX) === false) return false;
+    @chmod($tmp, 0644);
+    if (!@rename($tmp, IZM_CONFIG_FILE)) {
+        @unlink($tmp);
+        return false;
+    }
+    return true;
+}
+
+function izm_misc_run_script($script, array $args = []) {
+    $cmd = 'bash ' . escapeshellarg($script);
+    foreach ($args as $arg) $cmd .= ' ' . escapeshellarg((string)$arg);
+    $cmd .= ' 2>&1';
+    $lines = [];
+    $ret = 0;
+    exec($cmd, $lines, $ret);
+    return [$ret, trim(implode("\n", $lines))];
+}
+
 $message = '';
 $error = '';
 [$zfsAvailable, $zfsOutput] = izm_zfs_state();
 $mappings = $zfsAvailable ? izm_load_iscsi_mappings() : [];
-
-$backstores = [];
-foreach ($mappings as $mapping) {
-    $backstore = $mapping['backstore'] ?? '';
-    if ($backstore === '' || strpos($backstore, '/backstores/block/') !== 0) continue;
-    if (!isset($backstores[$backstore])) {
-        $backstores[$backstore] = [
-            'backstore' => $backstore,
-            'device' => $mapping['device'] ?? '',
-            'zvol' => $mapping['zvol'] ?? '',
-            'unmap' => $mapping['unmap'] ?? 'unknown',
-            'luns' => [],
-        ];
-    }
-    $backstores[$backstore]['luns'][] = [
-        'iqn' => $mapping['iqn'] ?? '',
-        'lun' => $mapping['lun'] ?? '',
-    ];
-    if (($mapping['unmap'] ?? '') !== '') $backstores[$backstore]['unmap'] = $mapping['unmap'];
-}
+$backstores = izm_misc_backstores($mappings);
+$autoUnmap = izm_misc_auto_unmap();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
     $action = $_POST['action'] ?? '';
-    $backstore = trim($_POST['backstore'] ?? '');
-    $value = $_POST['unmap'] ?? '';
 
-    if ($action === 'set_unmap') {
+    if ($action === 'set_auto_unmap') {
+        $value = $_POST['auto_unmap'] ?? '';
+        if ($value !== 'on' && $value !== 'off') {
+            $error = 'Invalid automatic UNMAP setting.';
+        } else {
+            $enabled = $value === 'on';
+            if (!izm_misc_write_auto_unmap($enabled)) {
+                $error = 'Unable to save automatic UNMAP policy to the USB configuration.';
+            } else {
+                $autoUnmap = $enabled;
+                if ($enabled) {
+                    [$ret, $output] = izm_misc_run_script(IZM_UNMAP_POLICY_SCRIPT);
+                    if ($ret === 0) {
+                        $message = 'Automatic UNMAP enabled. Existing mapped ZVOL block backstores were reconciled immediately; new mappings are checked once per minute.';
+                    } else {
+                        $error = preg_replace('/^ERROR:\s*/m', '', $output ?: 'Automatic UNMAP was saved but the immediate reconciliation failed.');
+                    }
+                } else {
+                    $message = 'Automatic UNMAP disabled. Existing emulate_tpu values were left unchanged; only future automatic enforcement is stopped.';
+                }
+            }
+        }
+    } elseif ($action === 'set_unmap') {
+        $backstore = trim($_POST['backstore'] ?? '');
+        $value = $_POST['unmap'] ?? '';
         if (!isset($backstores[$backstore])) {
             $error = 'Unknown or no-longer-mapped block backstore.';
         } elseif ($value !== 'on' && $value !== 'off') {
             $error = 'Invalid UNMAP setting.';
+        } elseif (($backstores[$backstore]['zvol'] ?? '') === '') {
+            $error = 'Manual UNMAP control is restricted to block backstores that resolve to a ZVOL.';
         } else {
-            $script = '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-unmap.sh';
-            $cmd = 'bash ' . escapeshellarg($script) . ' set ' . escapeshellarg($backstore) . ' ' . escapeshellarg($value) . ' 2>&1';
-            $lines = [];
-            $ret = 0;
-            exec($cmd, $lines, $ret);
-            $output = trim(implode("\n", $lines));
+            [$ret, $output] = izm_misc_run_script(IZM_UNMAP_SCRIPT, ['set', $backstore, $value]);
             if ($ret === 0) $message = $output ?: 'UNMAP setting updated.';
             else $error = preg_replace('/^ERROR:\s*/m', '', $output ?: 'Failed to update UNMAP setting.');
-
-            // Re-read live LIO state after applying the attribute.
-            $mappings = izm_load_iscsi_mappings();
-            $backstores = [];
-            foreach ($mappings as $mapping) {
-                $bs = $mapping['backstore'] ?? '';
-                if ($bs === '' || strpos($bs, '/backstores/block/') !== 0) continue;
-                if (!isset($backstores[$bs])) {
-                    $backstores[$bs] = [
-                        'backstore' => $bs,
-                        'device' => $mapping['device'] ?? '',
-                        'zvol' => $mapping['zvol'] ?? '',
-                        'unmap' => $mapping['unmap'] ?? 'unknown',
-                        'luns' => [],
-                    ];
-                }
-                $backstores[$bs]['luns'][] = ['iqn' => $mapping['iqn'] ?? '', 'lun' => $mapping['lun'] ?? ''];
-                if (($mapping['unmap'] ?? '') !== '') $backstores[$bs]['unmap'] = $mapping['unmap'];
-            }
         }
     }
+
+    $mappings = izm_load_iscsi_mappings();
+    $backstores = izm_misc_backstores($mappings);
+    $autoUnmap = izm_misc_auto_unmap();
+} elseif ($zfsAvailable && $autoUnmap) {
+    // Opening Misc also performs a lightweight immediate reconciliation. Cron
+    // remains the mechanism that catches backstores created by another plugin.
+    izm_misc_run_script(IZM_UNMAP_POLICY_SCRIPT);
+    $mappings = izm_load_iscsi_mappings();
+    $backstores = izm_misc_backstores($mappings);
 }
 
 izm_styles();
@@ -83,6 +146,27 @@ $csrf = izm_csrf();
 
   <?php if ($zfsAvailable): ?>
   <div class="izm-card">
+    <div class="izm-title">Automatic SCSI UNMAP for ZVOL backstores</div>
+    <div class="izm-sub">When enabled, the plugin checks mapped <code>/backstores/block/...</code> entries once per minute. If a block backstore resolves to <code>/dev/zvol/...</code> and UNMAP is not enabled, the plugin sets <code>emulate_tpu=1</code>. Physical disks and block backstores that cannot be correlated to a ZVOL are ignored.</div>
+    <form method="post" class="izm-row" style="max-width:720px">
+      <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+      <input type="hidden" name="action" value="set_auto_unmap">
+      <div class="izm-field" style="max-width:340px">
+        <label>Auto-enable UNMAP</label>
+        <select name="auto_unmap" onchange="if(confirm(this.value==='on' ? 'Enable automatic UNMAP for current and future mapped ZVOL backstores?' : 'Stop automatically enabling UNMAP? Existing LIO values will not be changed.')) this.form.submit(); else this.value='<?=$autoUnmap ? 'on' : 'off'?>';">
+          <option value="off" <?=$autoUnmap ? '' : 'selected'?>>Off</option>
+          <option value="on" <?=$autoUnmap ? 'selected' : ''?>>On</option>
+        </select>
+      </div>
+      <div style="padding-bottom:6px">
+        <?php if ($autoUnmap): ?><span class="izm-pill izm-pill-ok">Policy active · checks every minute</span>
+        <?php else: ?><span class="izm-pill">Policy disabled</span><?php endif; ?>
+      </div>
+    </form>
+    <div class="izm-small">Turning the policy <strong>Off</strong> stops future enforcement but deliberately does not set existing backstores back to <code>emulate_tpu=0</code>. Use the per-backstore switch below if you want to disable one explicitly.</div>
+  </div>
+
+  <div class="izm-card">
     <div class="izm-title">SCSI UNMAP / Thin Provisioning</div>
     <div class="izm-sub">Linux LIO exposes SCSI UNMAP to the initiator through the backstore attribute <code>emulate_tpu</code>. Enabling it allows a filesystem such as NTFS to return unused ZVOL ranges to ZFS, provided the underlying ZVOL/block device supports discard.</div>
 
@@ -94,12 +178,13 @@ $csrf = izm_csrf();
         <tbody>
         <?php foreach ($backstores as $bs):
           $state = $bs['unmap'] ?? 'unknown';
+          $isZvol = ($bs['zvol'] ?? '') !== '';
         ?>
           <tr>
             <td><code><?=izm_h($bs['backstore'])?></code></td>
             <td>
-              <?php if (($bs['zvol'] ?? '') !== ''): ?><code><?=izm_h($bs['zvol'])?></code>
-              <?php else: ?><code><?=izm_h($bs['device'] ?: 'unknown device')?></code><?php endif; ?>
+              <?php if ($isZvol): ?><code><?=izm_h($bs['zvol'])?></code>
+              <?php else: ?><code><?=izm_h($bs['device'] ?: 'unknown device')?></code><div class="izm-small">Not controlled by auto policy</div><?php endif; ?>
             </td>
             <td>
               <?php foreach ($bs['luns'] as $lun): ?>
@@ -107,6 +192,7 @@ $csrf = izm_csrf();
               <?php endforeach; ?>
             </td>
             <td>
+              <?php if ($isZvol): ?>
               <form method="post" class="izm-actions">
                 <input type="hidden" name="csrf_token" value="<?=$csrf?>">
                 <input type="hidden" name="action" value="set_unmap">
@@ -120,6 +206,9 @@ $csrf = izm_csrf();
                 <?php elseif ($state === 'off'): ?><span class="izm-pill">emulate_tpu=0</span>
                 <?php else: ?><span class="izm-pill izm-pill-warn">unknown</span><?php endif; ?>
               </form>
+              <?php else: ?>
+                <span class="izm-pill izm-pill-warn"><?=izm_h($state)?></span>
+              <?php endif; ?>
             </td>
           </tr>
         <?php endforeach; ?>
@@ -127,7 +216,7 @@ $csrf = izm_csrf();
       </table>
     <?php endif; ?>
 
-    <div class="izm-warn"><strong>Important:</strong> changing <code>emulate_tpu</code> changes the live LIO backstore. Windows may cache the disk provisioning capabilities, so disconnect/reconnect the iSCSI session (or remove/re-add the disk) before testing ReTrim. This control does not run <code>blkdiscard</code> and does not discard the whole ZVOL.</div>
+    <div class="izm-warn"><strong>Important:</strong> changing <code>emulate_tpu</code> changes the live LIO backstore. Windows may cache the disk provisioning capabilities, so disconnect/reconnect the iSCSI session (or remove/re-add the disk) before testing ReTrim. These controls never run <code>blkdiscard</code> and never discard the whole ZVOL.</div>
   </div>
 
   <div class="izm-card">
@@ -142,7 +231,7 @@ $csrf = izm_csrf();
     <div class="izm-code">Optimize-Volume -DriveLetter F -ReTrim -Verbose</div>
     <div class="izm-sub" style="margin-top:12px">Alternative command:</div>
     <div class="izm-code">defrag F: /L /V</div>
-    <div class="izm-sub" style="margin-top:14px">Replace <code>F</code> with the actual iSCSI drive letter. A successful ReTrim should make the live ZVOL's <strong>Referenced</strong> value fall substantially toward the filesystem's actual used data. It will not necessarily match NTFS byte-for-byte because allocation, metadata, compression, and block sizes differ.</div>
+    <div class="izm-sub" style="margin-top:14px">Replace <code>F</code> with the actual iSCSI drive letter. If Windows still reports that ReTrim is unsupported, verify the backstore above shows <strong>UNMAP On</strong>, then disconnect/reconnect the iSCSI disk again. A successful ReTrim should make the live ZVOL's <strong>Referenced</strong> value fall substantially toward the filesystem's actual used data. It will not necessarily match NTFS byte-for-byte because allocation, metadata, compression, and block sizes differ.</div>
   </div>
 
   <div class="izm-card">
