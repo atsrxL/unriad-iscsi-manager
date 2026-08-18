@@ -56,7 +56,7 @@ $csrf = izm_csrf();
 ?>
 <div class="izm-wrap">
   <h2>Z Status</h2>
-  <div class="izm-sub">ZFS pool/ZVOL state plus configured LIO mappings and real-time iSCSI sessions reported by <code>targetcli sessions detail</code>.</div>
+  <div class="izm-sub">ZFS pool/ZVOL state plus configured LIO mappings. Active logins are read from <code>targetcli sessions detail</code> and, for demo/dynamic ACL targets, directly from configfs <code>dynamic_sessions</code>.</div>
   <?php izm_notices($message, $error, $zfsAvailable, $zfsOutput); ?>
 
   <?php if ($zfsAvailable): ?>
@@ -112,7 +112,7 @@ $csrf = izm_csrf();
       <div class="izm-sub">No ZVOLs found.</div>
     <?php else: ?>
     <table class="izm-table">
-      <thead><tr><th>Name</th><th>Pool</th><th>Size</th><th>Used</th><th>Provision</th><th>Compression</th><th>Block</th><th>Origin</th><th>Discard</th><th>iSCSI</th></tr></thead>
+      <thead><tr><th>Name</th><th>Pool</th><th>Size</th><th>ZFS Used</th><th>Referenced</th><th>Provision</th><th>Compression</th><th>Block</th><th>Origin</th><th>Discard</th><th>iSCSI</th></tr></thead>
       <tbody>
       <?php foreach ($volumes as $v):
         $vmaps = $mappedByZvol[$v['name']] ?? [];
@@ -124,6 +124,7 @@ $csrf = izm_csrf();
           <td><?=izm_h($v['pool'])?></td>
           <td><?=izm_h(izm_bytes($v['volsize']))?></td>
           <td><?=izm_h(izm_bytes($v['used']))?></td>
+          <td><?=izm_h(izm_bytes($v['refer']))?></td>
           <td><span class="izm-pill"><?=izm_h($v['provision'])?></span></td>
           <td><?=izm_h($v['compression'])?></td>
           <td><?=izm_h(izm_block($v['volblocksize']))?></td>
@@ -140,7 +141,7 @@ $csrf = izm_csrf();
             <?php if (!empty($vsessions)): ?>
               <span class="izm-pill izm-pill-live">Connected</span>
               <?php foreach ($vsessions as $s): ?>
-                <div class="izm-small"><?=izm_h($s['address'] ?: 'unknown IP')?> · <?=izm_h($s['initiator'])?></div>
+                <div class="izm-small"><?=izm_h($s['address'] ?: 'IP unavailable')?> · <?=izm_h($s['initiator'])?></div>
               <?php endforeach; ?>
             <?php elseif (!empty($vmaps)): ?>
               <span class="izm-pill izm-pill-ok">Mapped / Offline</span>
@@ -158,9 +159,9 @@ $csrf = izm_csrf();
 
   <div class="izm-card">
     <div class="izm-title">Active Sessions</div>
-    <div class="izm-sub">Only currently open LIO sessions are listed here. A configured LUN with no session remains “Mapped / Offline”.</div>
+    <div class="izm-sub">ACL-backed sessions use targetcli's detailed session data. Demo-mode/dynamic ACL sessions are detected through LIO configfs; their initiator IQN is reliable, while the client IP is shown only when it can be correlated unambiguously to the target's established TCP connection.</div>
     <?php if (empty($sessions)): ?>
-      <div class="izm-sub">No open iSCSI sessions reported by targetcli.</div>
+      <div class="izm-sub">No open iSCSI sessions detected by targetcli or configfs.</div>
     <?php else: ?>
       <table class="izm-table">
         <thead><tr><th>SID</th><th>Target / LUN</th><th>ZVOL</th><th>Initiator IQN</th><th>Initiator IP</th><th>Session</th><th>Connection</th><th>Mode</th></tr></thead>
@@ -171,7 +172,7 @@ $csrf = izm_csrf();
             <td><code><?=izm_h($s['targetIqn'] ?: 'unknown target')?></code><div class="izm-small"><?=izm_h($s['targetLun'] ?: ('mapped-lun '.$s['mappedLun']))?></div></td>
             <td><?=($s['zvol'] ?? '') !== '' ? '<code>'.izm_h($s['zvol']).'</code>' : izm_h($s['backstore'])?></td>
             <td><code><?=izm_h($s['initiator'])?></code></td>
-            <td><?=izm_h($s['address'] ?: 'unknown')?><div class="izm-small"><?=izm_h($s['transport'])?></div></td>
+            <td><?=izm_h($s['address'] ?: 'unavailable')?><div class="izm-small"><?=izm_h($s['transport'])?><?=$s['dynamic'] ? ' · dynamic' : ''?></div></td>
             <td><span class="izm-pill izm-pill-live"><?=izm_h($s['sessionState'] ?: 'open')?></span></td>
             <td><?=izm_h($s['connectionState'] ?: 'unknown')?></td>
             <td><?=izm_h($s['mode'])?></td>
@@ -199,7 +200,7 @@ $csrf = izm_csrf();
             <div>
               <?php if (!empty($live)): ?>
                 <span class="izm-pill izm-pill-live">Connected</span>
-                <?php foreach ($live as $s): ?><div class="izm-small"><?=izm_h($s['address'])?> · <?=izm_h($s['initiator'])?></div><?php endforeach; ?>
+                <?php foreach ($live as $s): ?><div class="izm-small"><?=izm_h($s['address'] ?: 'IP unavailable')?> · <?=izm_h($s['initiator'])?></div><?php endforeach; ?>
               <?php else: ?>
                 <span class="izm-pill">Offline</span>
               <?php endif; ?>
@@ -215,10 +216,10 @@ $csrf = izm_csrf();
 
   <div class="izm-card">
     <div class="izm-title">Space Reclaim / TRIM</div>
-    <div class="izm-sub">There are two different discard layers. Pool TRIM works on free ZFS pool extents and sends TRIM to the physical SSDs. ZVOL reclaim must originate inside the filesystem using the ZVOL, normally as SCSI UNMAP from the iSCSI initiator.</div>
-    <div class="izm-warn"><strong>ZVOL:</strong> deleting a file in NTFS/ext4 only marks blocks free inside that filesystem. ZFS cannot know those blocks are free until the client sends discard/UNMAP. On Windows you can run <span class="izm-code">Optimize-Volume -DriveLetter X -ReTrim -Verbose</span> (or <span class="izm-code">defrag X: /L</span>). The LIO mapping should show <strong>UNMAP on</strong> and the ZVOL should show <strong>Discard Supported</strong> above.</div>
-    <div class="izm-warn"><strong>Snapshots:</strong> there is no safe “snapshot TRIM”. A snapshot intentionally pins the old blocks. Delete snapshots you no longer need; only then can those blocks become free in the pool. Running <code>zpool trim</code> afterwards informs the physical SSD of newly free pool space.</div>
-    <div class="izm-sub">For a Thick ZVOL, <code>refreservation</code> can continue reserving capacity for that volume even after guest discard reduces referenced data. Pool TRIM improves the underlying SSD/thin-device free-block knowledge; it does not remove that reservation.</div>
+    <div class="izm-sub">There are two different discard layers. Pool TRIM works only on extents that ZFS already knows are free and sends TRIM to the physical SSDs. It does <strong>not</strong> discover free clusters inside NTFS.</div>
+    <div class="izm-warn"><strong>ZVOL:</strong> deleting a file in NTFS/ext4 only marks blocks free inside that filesystem. ZFS cannot know those blocks are free until the client sends discard/UNMAP. On Windows run <span class="izm-code">Optimize-Volume -DriveLetter X -ReTrim -Verbose</span> (or <span class="izm-code">defrag X: /L</span>). The LIO mapping should show <strong>UNMAP on</strong> and the ZVOL should show <strong>Discard Supported</strong>.</div>
+    <div class="izm-warn"><strong>Snapshots:</strong> there is no safe “snapshot TRIM”. A snapshot intentionally pins the old blocks. In Snapshot Manager, <strong>Unique Used</strong> is the space uniquely held by that snapshot; <strong>Referenced Data</strong> is merely how much data is visible from the snapshot.</div>
+    <div class="izm-sub">For a Thick ZVOL, <code>refreservation</code> can continue reserving capacity even after guest discard reduces referenced data. Pool TRIM improves the physical SSD's knowledge of free pool extents; it does not remove the ZVOL reservation.</div>
   </div>
   <?php endif; ?>
 </div>
