@@ -1,0 +1,154 @@
+Menu="unraid-iscsi-manager:50"
+Title="Misc"
+Type="php"
+Tag="fa-wrench"
+---
+<?php
+require_once '/usr/local/emhttp/plugins/unraid-iscsi-manager/include/common.php';
+
+$message = '';
+$error = '';
+[$zfsAvailable, $zfsOutput] = izm_zfs_state();
+$mappings = $zfsAvailable ? izm_load_iscsi_mappings() : [];
+
+$backstores = [];
+foreach ($mappings as $mapping) {
+    $backstore = $mapping['backstore'] ?? '';
+    if ($backstore === '' || strpos($backstore, '/backstores/block/') !== 0) continue;
+    if (!isset($backstores[$backstore])) {
+        $backstores[$backstore] = [
+            'backstore' => $backstore,
+            'device' => $mapping['device'] ?? '',
+            'zvol' => $mapping['zvol'] ?? '',
+            'unmap' => $mapping['unmap'] ?? 'unknown',
+            'luns' => [],
+        ];
+    }
+    $backstores[$backstore]['luns'][] = [
+        'iqn' => $mapping['iqn'] ?? '',
+        'lun' => $mapping['lun'] ?? '',
+    ];
+    if (($mapping['unmap'] ?? '') !== '') $backstores[$backstore]['unmap'] = $mapping['unmap'];
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
+    $action = $_POST['action'] ?? '';
+    $backstore = trim($_POST['backstore'] ?? '');
+    $value = $_POST['unmap'] ?? '';
+
+    if ($action === 'set_unmap') {
+        if (!isset($backstores[$backstore])) {
+            $error = 'Unknown or no-longer-mapped block backstore.';
+        } elseif ($value !== 'on' && $value !== 'off') {
+            $error = 'Invalid UNMAP setting.';
+        } else {
+            $script = '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-unmap.sh';
+            $cmd = 'bash ' . escapeshellarg($script) . ' set ' . escapeshellarg($backstore) . ' ' . escapeshellarg($value) . ' 2>&1';
+            $lines = [];
+            $ret = 0;
+            exec($cmd, $lines, $ret);
+            $output = trim(implode("\n", $lines));
+            if ($ret === 0) $message = $output ?: 'UNMAP setting updated.';
+            else $error = preg_replace('/^ERROR:\s*/m', '', $output ?: 'Failed to update UNMAP setting.');
+
+            // Re-read live LIO state after applying the attribute.
+            $mappings = izm_load_iscsi_mappings();
+            $backstores = [];
+            foreach ($mappings as $mapping) {
+                $bs = $mapping['backstore'] ?? '';
+                if ($bs === '' || strpos($bs, '/backstores/block/') !== 0) continue;
+                if (!isset($backstores[$bs])) {
+                    $backstores[$bs] = [
+                        'backstore' => $bs,
+                        'device' => $mapping['device'] ?? '',
+                        'zvol' => $mapping['zvol'] ?? '',
+                        'unmap' => $mapping['unmap'] ?? 'unknown',
+                        'luns' => [],
+                    ];
+                }
+                $backstores[$bs]['luns'][] = ['iqn' => $mapping['iqn'] ?? '', 'lun' => $mapping['lun'] ?? ''];
+                if (($mapping['unmap'] ?? '') !== '') $backstores[$bs]['unmap'] = $mapping['unmap'];
+            }
+        }
+    }
+}
+
+izm_styles();
+$csrf = izm_csrf();
+?>
+<div class="izm-wrap">
+  <h2>Misc</h2>
+  <div class="izm-sub">LIO target options and client-side maintenance notes that do not belong to ZVOL creation or snapshot management.</div>
+  <?php izm_notices($message, $error, $zfsAvailable, $zfsOutput); ?>
+
+  <?php if ($zfsAvailable): ?>
+  <div class="izm-card">
+    <div class="izm-title">SCSI UNMAP / Thin Provisioning</div>
+    <div class="izm-sub">Linux LIO exposes SCSI UNMAP to the initiator through the backstore attribute <code>emulate_tpu</code>. Enabling it allows a filesystem such as NTFS to return unused ZVOL ranges to ZFS, provided the underlying ZVOL/block device supports discard.</div>
+
+    <?php if (empty($backstores)): ?>
+      <div class="izm-sub">No mapped LIO block backstores were detected.</div>
+    <?php else: ?>
+      <table class="izm-table">
+        <thead><tr><th>Backstore</th><th>ZVOL / Device</th><th>Mapped LUNs</th><th>UNMAP</th></tr></thead>
+        <tbody>
+        <?php foreach ($backstores as $bs):
+          $state = $bs['unmap'] ?? 'unknown';
+        ?>
+          <tr>
+            <td><code><?=izm_h($bs['backstore'])?></code></td>
+            <td>
+              <?php if (($bs['zvol'] ?? '') !== ''): ?><code><?=izm_h($bs['zvol'])?></code>
+              <?php else: ?><code><?=izm_h($bs['device'] ?: 'unknown device')?></code><?php endif; ?>
+            </td>
+            <td>
+              <?php foreach ($bs['luns'] as $lun): ?>
+                <div><span class="izm-small"><?=izm_h($lun['iqn'])?> / <?=izm_h($lun['lun'])?></span></div>
+              <?php endforeach; ?>
+            </td>
+            <td>
+              <form method="post" class="izm-actions">
+                <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+                <input type="hidden" name="action" value="set_unmap">
+                <input type="hidden" name="backstore" value="<?=izm_h($bs['backstore'])?>">
+                <select name="unmap" onchange="if(confirm('Change SCSI UNMAP advertisement for this LIO backstore? Reconnect Windows iSCSI afterwards.')) this.form.submit(); else this.value='<?=($state === 'on' ? 'on' : 'off')?>';">
+                  <option value="off" <?=$state === 'off' ? 'selected' : ''?>>Off</option>
+                  <option value="on" <?=$state === 'on' ? 'selected' : ''?>>On</option>
+                  <?php if ($state !== 'on' && $state !== 'off'): ?><option selected disabled>Unknown</option><?php endif; ?>
+                </select>
+                <?php if ($state === 'on'): ?><span class="izm-pill izm-pill-ok">emulate_tpu=1</span>
+                <?php elseif ($state === 'off'): ?><span class="izm-pill">emulate_tpu=0</span>
+                <?php else: ?><span class="izm-pill izm-pill-warn">unknown</span><?php endif; ?>
+              </form>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    <?php endif; ?>
+
+    <div class="izm-warn"><strong>Important:</strong> changing <code>emulate_tpu</code> changes the live LIO backstore. Windows may cache the disk provisioning capabilities, so disconnect/reconnect the iSCSI session (or remove/re-add the disk) before testing ReTrim. This control does not run <code>blkdiscard</code> and does not discard the whole ZVOL.</div>
+  </div>
+
+  <div class="izm-card">
+    <div class="izm-title">Windows: reclaim deleted NTFS space</div>
+    <div class="izm-sub">Use this after UNMAP is enabled for the corresponding backstore.</div>
+    <ol style="line-height:1.7; margin-left:22px">
+      <li>Close applications using the iSCSI disk.</li>
+      <li>Disconnect and reconnect the Windows iSCSI target so Windows re-queries SCSI thin-provisioning / UNMAP support.</li>
+      <li>Open <strong>PowerShell as Administrator</strong>.</li>
+      <li>Run the ReTrim command for the correct drive letter:</li>
+    </ol>
+    <div class="izm-code">Optimize-Volume -DriveLetter F -ReTrim -Verbose</div>
+    <div class="izm-sub" style="margin-top:12px">Alternative command:</div>
+    <div class="izm-code">defrag F: /L /V</div>
+    <div class="izm-sub" style="margin-top:14px">Replace <code>F</code> with the actual iSCSI drive letter. A successful ReTrim should make the live ZVOL's <strong>Referenced</strong> value fall substantially toward the filesystem's actual used data. It will not necessarily match NTFS byte-for-byte because allocation, metadata, compression, and block sizes differ.</div>
+  </div>
+
+  <div class="izm-card">
+    <div class="izm-title">How snapshots affect reclaim</div>
+    <div class="izm-sub">A snapshot taken <em>before</em> ReTrim intentionally preserves blocks that the live ZVOL later discards. In that case the snapshot's <strong>Unique Used</strong> can rise while the live ZVOL's <strong>Referenced</strong> falls. Deleting that old snapshot is what finally allows its pinned blocks to become free in the ZFS pool.</div>
+    <div class="izm-sub">A snapshot taken <em>after</em> successful ReTrim can instead show a much lower <strong>Referenced Data</strong> value and initially near-zero <strong>Unique Used</strong>. Pool-level <code>zpool trim</code> is a separate final layer: it only informs the physical SSD about extents that ZFS already considers free.</div>
+  </div>
+  <?php endif; ?>
+</div>
