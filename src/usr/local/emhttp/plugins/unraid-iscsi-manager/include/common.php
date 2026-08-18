@@ -151,25 +151,58 @@ function izm_load_iscsi_sessions(array $mappings = []) {
     if (empty($lines)) return [];
 
     $byBackstore = [];
+    $byTarget = [];
     foreach ($mappings as $mapping) {
         $backstore = $mapping['backstore'] ?? '';
         if ($backstore !== '') $byBackstore[$backstore][] = $mapping;
+        $targetKey = ($mapping['iqn'] ?? '') . "\x1f" . ($mapping['tpg'] ?? '');
+        if (($mapping['iqn'] ?? '') !== '') $byTarget[$targetKey][] = $mapping;
     }
 
     $out = [];
+    $seen = [];
     foreach ($lines as $line) {
         if ($line === '') continue;
-        $row = array_pad(explode("\t", $line), 10, '');
-        [$sid, $alias, $initiator, $sessionState, $connectionState, $address, $transport, $mappedLun, $backstore, $mode] = array_slice($row, 0, 10);
-        $matches = $byBackstore[$backstore] ?? [null];
+        $row = array_pad(explode("\t", $line), 12, '');
+        [
+            $sid, $alias, $initiator, $sessionState, $connectionState, $address,
+            $transport, $mappedLun, $backstore, $mode, $reportedTargetIqn, $reportedTargetTpg
+        ] = array_slice($row, 0, 12);
+
+        if ($backstore !== '') {
+            $matches = $byBackstore[$backstore] ?? [null];
+        } elseif ($reportedTargetIqn !== '') {
+            $targetKey = $reportedTargetIqn . "\x1f" . $reportedTargetTpg;
+            $matches = $byTarget[$targetKey] ?? [null];
+        } else {
+            $matches = [null];
+        }
+
         foreach ($matches as $mapping) {
-            $targetIqn = $mapping['iqn'] ?? '';
+            $targetIqn = $mapping['iqn'] ?? $reportedTargetIqn;
+            $targetTpg = $mapping['tpg'] ?? $reportedTargetTpg;
             $targetLun = $mapping['lun'] ?? '';
             $zvol = $mapping['zvol'] ?? '';
             $unmap = $mapping['unmap'] ?? 'unknown';
+            $effectiveBackstore = $mapping['backstore'] ?? $backstore;
+            $effectiveMappedLun = $mappedLun;
+            if ($effectiveMappedLun === '' && preg_match('/^Lun([0-9]+)$/i', $targetLun, $m)) {
+                $effectiveMappedLun = $m[1];
+            }
+
+            // targetcli may report the same ACL session that also appears in
+            // configfs dynamic_sessions. Prefer the richer targetcli record.
+            $dedupeKey = implode('|', [$initiator, $targetIqn, $targetLun, $effectiveBackstore]);
+            if (isset($seen[$dedupeKey])) continue;
+            $seen[$dedupeKey] = true;
+
+            $dynamic = ($sid === 'dynamic');
+            $backstore = $effectiveBackstore;
+            $mappedLun = $effectiveMappedLun;
             $out[] = compact(
                 'sid', 'alias', 'initiator', 'sessionState', 'connectionState', 'address',
-                'transport', 'mappedLun', 'backstore', 'mode', 'targetIqn', 'targetLun', 'zvol', 'unmap'
+                'transport', 'mappedLun', 'backstore', 'mode', 'targetIqn', 'targetTpg',
+                'targetLun', 'zvol', 'unmap', 'dynamic'
             );
         }
     }

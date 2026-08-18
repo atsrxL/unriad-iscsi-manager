@@ -39,6 +39,7 @@ jobs:
         run: |
           set -euo pipefail
           parent='src/usr/local/emhttp/plugins/unraid-iscsi-manager/unraid-iscsi-manager.page'
+          sessions='src/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-sessions.sh'
           grep -qx 'Type="xmenu"' "$parent"
           grep -qx 'Tabs="true"' "$parent"
 
@@ -53,8 +54,24 @@ jobs:
           OUT
           EOF
           chmod +x /tmp/izm-test-bin/targetcli
-          PATH="/tmp/izm-test-bin:$PATH" bash src/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-sessions.sh > /tmp/izm-sessions.tsv
+          PATH="/tmp/izm-test-bin:$PATH" TARGET_ISCSI_ROOT=/tmp/does-not-exist bash "$sessions" > /tmp/izm-sessions.tsv
           grep -F $'7\tWIN-GAME\tiqn.1991-05.com.microsoft:win-game\tLOGGED_IN\tLOGGED_IN\t192.168.123.25\tTCP\t0\t/backstores/block/iscsi\trw' /tmp/izm-sessions.tsv
+
+          # targetcli can omit demo-mode sessions. Verify the configfs fallback.
+          cat > /tmp/izm-test-bin/targetcli <<'EOF'
+          #!/bin/bash
+          exit 0
+          EOF
+          cat > /tmp/izm-test-bin/ss <<'EOF'
+          #!/bin/bash
+          echo '0 0 10.0.0.1:3260 192.168.123.25:50123'
+          EOF
+          chmod +x /tmp/izm-test-bin/targetcli /tmp/izm-test-bin/ss
+          root='/tmp/izm-config/iqn.2003-01.org.linux-iscsi.qnas.test/tpgt_1'
+          mkdir -p "$root/np/0.0.0.0:3260"
+          echo 'iqn.1991-05.com.microsoft:win-game' > "$root/dynamic_sessions"
+          PATH="/tmp/izm-test-bin:$PATH" TARGET_ISCSI_ROOT=/tmp/izm-config bash "$sessions" > /tmp/izm-dynamic.tsv
+          grep -F $'dynamic\t\tiqn.1991-05.com.microsoft:win-game\tLOGGED_IN\tLOGGED_IN\t192.168.123.25\tTCP\t\t\trw\tiqn.2003-01.org.linux-iscsi.qnas.test\ttpg1' /tmp/izm-dynamic.tsv
 
       - name: Build plugin assets
         run: bash ./scripts/build-release.sh
