@@ -25,6 +25,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Lint PHP and shell sources
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' file; do
+            php -l "$file"
+          done < <(find src -type f \( -name '*.php' -o -name '*.page' \) -print0)
+          while IFS= read -r -d '' file; do
+            bash -n "$file"
+          done < <(find src scripts -type f -name '*.sh' -print0)
+
       - name: Build plugin assets
         run: bash ./scripts/build-release.sh
 
