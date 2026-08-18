@@ -1,6 +1,5 @@
 Menu="OtherSettings"
+Type="xmenu"
 Title="iSCSI ZVOL Manager"
 Icon="database"
-Type="menu"
 Tabs="true"
----
