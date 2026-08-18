@@ -25,11 +25,13 @@
 
 <CHANGES>
 ### @VERSION@
-- Split the WebGUI into four native Unraid tabs: Z Status, ZVOL Creator, Snapshot Manager, and Snapshot Refresher.
-- Add Z Status overview for ZFS pools and ZVOL properties.
-- Add LIO iSCSI IQN/LUN mapping discovery from configfs, including backstore, ZVOL, and ALUA group display.
-- Show mapped IQN/LUN associations directly beside each ZVOL.
-- Snapshot Refresher now highlights configured iSCSI mappings before refresh.
+- Fix the blank/white plugin page by using the native Unraid xmenu tab container format.
+- Add live iSCSI session discovery from targetcli: initiator IQN, initiator IP, SID, session state, connection state, mapped LUN, and mode.
+- Distinguish configured/offline LUN mappings from actively connected initiators in Z Status.
+- Show LIO SCSI UNMAP advertisement and ZVOL block-device discard capability.
+- Add ZPOOL manual TRIM start/resume, suspend, cancel, and autotrim on/off controls.
+- Add safe reclaim guidance: guest filesystem discard/UNMAP for ZVOLs, snapshot deletion for snapshot-pinned blocks, and pool TRIM for underlying SSD free extents.
+- Add PHP/page and shell syntax linting to the release workflow.
 </CHANGES>
 
 <FILE Run="/bin/bash">
