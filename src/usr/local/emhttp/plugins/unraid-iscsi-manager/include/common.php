@@ -2,6 +2,7 @@
 
 define('IZM_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/zvol-manager.sh');
 define('IZM_ISCSI_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-map.sh');
+define('IZM_SESSIONS_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-sessions.sh');
 
 function izm_h($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -19,6 +20,15 @@ function izm_run(array $args) {
     return [$ret, trim(implode("\n", $out))];
 }
 
+function izm_script_lines($script) {
+    if (!is_file($script)) return [];
+    $cmd = 'bash ' . escapeshellarg($script) . ' 2>&1';
+    $lines = [];
+    $ret = 0;
+    exec($cmd, $lines, $ret);
+    return $ret === 0 ? $lines : [];
+}
+
 function izm_rows(array $args, $columns) {
     [$ret, $output] = izm_run($args);
     if ($ret !== 0 || $output === '') return [];
@@ -33,7 +43,7 @@ function izm_rows(array $args, $columns) {
 }
 
 function izm_bytes($value) {
-    if (!is_numeric($value)) return (string)$value;
+    if (!is_numeric($value) || $value === '') return (string)$value;
     $n = (float)$value;
     $units = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'];
     $i = 0;
@@ -68,6 +78,16 @@ function izm_load_pools() {
     return $out;
 }
 
+function izm_load_pool_trim_info() {
+    $rows = izm_rows(['pool-trim-info'], 2);
+    $out = [];
+    foreach ($rows as $row) {
+        [$name, $autotrim] = $row;
+        $out[$name] = compact('name', 'autotrim');
+    }
+    return $out;
+}
+
 function izm_load_volumes() {
     $rows = izm_rows(['volumes'], 8);
     $out = [];
@@ -78,6 +98,16 @@ function izm_load_volumes() {
             ? 'Clone'
             : ((is_numeric($refreservation) && (int)$refreservation > 0) ? 'Thick' : 'Thin');
         $out[] = compact('name', 'pool', 'volsize', 'used', 'refer', 'compression', 'volblocksize', 'refreservation', 'origin', 'provision');
+    }
+    return $out;
+}
+
+function izm_load_volume_discard_info() {
+    $rows = izm_rows(['volume-discard-info'], 4);
+    $out = [];
+    foreach ($rows as $row) {
+        [$name, $supported, $max, $granularity] = $row;
+        $out[$name] = compact('name', 'supported', 'max', 'granularity');
     }
     return $out;
 }
@@ -94,18 +124,15 @@ function izm_load_snapshots($volume) {
 }
 
 function izm_load_iscsi_mappings() {
-    $cmd = 'bash ' . escapeshellarg(IZM_ISCSI_SCRIPT) . ' 2>&1';
-    $lines = [];
-    $ret = 0;
-    exec($cmd, $lines, $ret);
-    if ($ret !== 0 || empty($lines)) return [];
+    $lines = izm_script_lines(IZM_ISCSI_SCRIPT);
+    if (empty($lines)) return [];
 
     $out = [];
     foreach ($lines as $line) {
         if ($line === '') continue;
-        $row = array_pad(explode("\t", $line), 7, '');
-        [$iqn, $tpg, $lun, $backstore, $device, $alua, $zvol] = array_slice($row, 0, 7);
-        $out[] = compact('iqn', 'tpg', 'lun', 'backstore', 'device', 'alua', 'zvol');
+        $row = array_pad(explode("\t", $line), 8, '');
+        [$iqn, $tpg, $lun, $backstore, $device, $alua, $zvol, $unmap] = array_slice($row, 0, 8);
+        $out[] = compact('iqn', 'tpg', 'lun', 'backstore', 'device', 'alua', 'zvol', 'unmap');
     }
     return $out;
 }
@@ -115,6 +142,46 @@ function izm_mappings_by_zvol(array $mappings) {
     foreach ($mappings as $mapping) {
         if (($mapping['zvol'] ?? '') === '') continue;
         $out[$mapping['zvol']][] = $mapping;
+    }
+    return $out;
+}
+
+function izm_load_iscsi_sessions(array $mappings = []) {
+    $lines = izm_script_lines(IZM_SESSIONS_SCRIPT);
+    if (empty($lines)) return [];
+
+    $byBackstore = [];
+    foreach ($mappings as $mapping) {
+        $backstore = $mapping['backstore'] ?? '';
+        if ($backstore !== '') $byBackstore[$backstore][] = $mapping;
+    }
+
+    $out = [];
+    foreach ($lines as $line) {
+        if ($line === '') continue;
+        $row = array_pad(explode("\t", $line), 10, '');
+        [$sid, $alias, $initiator, $sessionState, $connectionState, $address, $transport, $mappedLun, $backstore, $mode] = array_slice($row, 0, 10);
+        $matches = $byBackstore[$backstore] ?? [null];
+        foreach ($matches as $mapping) {
+            $targetIqn = $mapping['iqn'] ?? '';
+            $targetLun = $mapping['lun'] ?? '';
+            $zvol = $mapping['zvol'] ?? '';
+            $unmap = $mapping['unmap'] ?? 'unknown';
+            $out[] = compact(
+                'sid', 'alias', 'initiator', 'sessionState', 'connectionState', 'address',
+                'transport', 'mappedLun', 'backstore', 'mode', 'targetIqn', 'targetLun', 'zvol', 'unmap'
+            );
+        }
+    }
+    return $out;
+}
+
+function izm_sessions_by_zvol(array $sessions) {
+    $out = [];
+    foreach ($sessions as $session) {
+        $zvol = $session['zvol'] ?? '';
+        if ($zvol === '') continue;
+        $out[$zvol][] = $session;
     }
     return $out;
 }
@@ -150,18 +217,21 @@ function izm_styles() {
 .izm-err { background:rgba(220,53,69,.13); border:1px solid rgba(220,53,69,.35); }
 .izm-warn { background:rgba(255,193,7,.13); border:1px solid rgba(255,193,7,.35); }
 .izm-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.izm-actions form { display:inline-block; margin:0; }
 .izm-small { font-size:12px; opacity:.75; }
 .izm-targets { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:8px; margin:12px 0; }
 .izm-target { padding:9px 10px; border:1px solid rgba(127,127,127,.25); border-radius:5px; }
 .izm-target.disabled { opacity:.38; }
 .izm-pill { display:inline-block; border:1px solid rgba(127,127,127,.35); border-radius:999px; padding:2px 7px; font-size:12px; }
 .izm-pill-ok { border-color:rgba(40,167,69,.5); background:rgba(40,167,69,.12); }
+.izm-pill-live { border-color:rgba(0,123,255,.55); background:rgba(0,123,255,.13); }
 .izm-pill-warn { border-color:rgba(255,193,7,.5); background:rgba(255,193,7,.12); }
 .izm-lun-tree { border-top:1px solid rgba(127,127,127,.22); }
 .izm-iqn { padding:12px 8px 7px; font-weight:600; }
-.izm-lun-row { margin-left:24px; padding:6px 8px 10px 18px; border-left:1px solid rgba(127,127,127,.28); display:grid; grid-template-columns:minmax(70px,100px) minmax(220px,1fr) minmax(220px,1fr) auto; gap:10px; align-items:center; }
+.izm-lun-row { margin-left:24px; padding:6px 8px 10px 18px; border-left:1px solid rgba(127,127,127,.28); display:grid; grid-template-columns:minmax(70px,100px) minmax(220px,1fr) minmax(220px,1fr) minmax(170px,auto); gap:10px; align-items:center; }
 .izm-lun-device { opacity:.8; overflow-wrap:anywhere; }
 .izm-dot { font-size:10px; vertical-align:2px; margin-right:5px; }
+.izm-code { padding:8px 10px; border:1px solid rgba(127,127,127,.25); border-radius:5px; font-family:monospace; display:inline-block; }
 @media (max-width:900px) { .izm-lun-row { grid-template-columns:1fr; } }
 @media (max-width:700px) { .izm-table { display:block; overflow-x:auto; } }
 </style>
