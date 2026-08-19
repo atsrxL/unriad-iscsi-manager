@@ -35,6 +35,27 @@ jobs:
             bash -n "$file"
           done < <(find src scripts -type f -name '*.sh' -print0)
 
+      - name: Verify Unraid page rendering safeguards
+        run: |
+          set -euo pipefail
+          status='src/usr/local/emhttp/plugins/unraid-iscsi-manager/unraid-iscsi-manager-status.page'
+          header="$(sed -n '1,/^---$/p' "$status")"
+          grep -qx 'Markdown="false"' <<< "$header"
+          grep -Fq '/plugins/unraid-iscsi-manager/status-tree.php' "$status"
+
+          # Unraid evaluates generated page content as eval('?>' . content).
+          # The status wrapper must be safe in that execution model and must
+          # remain a thin AJAX shell rather than executing ZFS logic in-page.
+          php -r '
+            $text = file_get_contents($argv[1]);
+            $parts = explode("\n---\n", $text, 2);
+            if (count($parts) !== 2) { fwrite(STDERR, "missing page separator\n"); exit(1); }
+            ob_start();
+            eval("?>" . $parts[1]);
+            $html = ob_get_clean();
+            if (strpos($html, "izm-status-tree-root") === false) exit(2);
+          ' "$status"
+
       - name: Smoke test tabs, sessions, and auto-UNMAP policy
         run: |
           set -euo pipefail
@@ -45,7 +66,7 @@ jobs:
           grep -qx 'Tabs="true"' "$parent"
 
           mkdir -p /tmp/izm-test-bin
-          cat > /tmp/izm-test-bin/targetcli <<'EOF'
+          cat > /tmp/izm-test-bin/targetcli <<'EOF_TARGETCLI'
           #!/bin/bash
           cat <<'OUT'
           alias: WIN-GAME sid: 7 type: Normal session-state: LOGGED_IN
@@ -53,20 +74,20 @@ jobs:
               mapped-lun: 0 backstore: block/iscsi mode: rw
               address: 192.168.123.25 (TCP)  cid: 0 connection-state: LOGGED_IN
           OUT
-          EOF
+          EOF_TARGETCLI
           chmod +x /tmp/izm-test-bin/targetcli
           PATH="/tmp/izm-test-bin:$PATH" TARGET_ISCSI_ROOT=/tmp/does-not-exist bash "$sessions" > /tmp/izm-sessions.tsv
           grep -F $'7\tWIN-GAME\tiqn.1991-05.com.microsoft:win-game\tLOGGED_IN\tLOGGED_IN\t192.168.123.25\tTCP\t0\t/backstores/block/iscsi\trw' /tmp/izm-sessions.tsv
 
           # targetcli can omit demo-mode sessions. Verify the configfs fallback.
-          cat > /tmp/izm-test-bin/targetcli <<'EOF'
+          cat > /tmp/izm-test-bin/targetcli <<'EOF_TARGETCLI_EMPTY'
           #!/bin/bash
           exit 0
-          EOF
-          cat > /tmp/izm-test-bin/ss <<'EOF'
+          EOF_TARGETCLI_EMPTY
+          cat > /tmp/izm-test-bin/ss <<'EOF_SS'
           #!/bin/bash
           echo '0 0 10.0.0.1:3260 192.168.123.25:50123'
-          EOF
+          EOF_SS
           chmod +x /tmp/izm-test-bin/targetcli /tmp/izm-test-bin/ss
           root='/tmp/izm-config/iqn.2003-01.org.linux-iscsi.qnas.test/tpgt_1'
           mkdir -p "$root/np/0.0.0.0:3260"
@@ -77,17 +98,17 @@ jobs:
           # Auto-UNMAP must only touch mapped block backstores that resolve to
           # ZVOLs and are not already reporting UNMAP=on.
           mkdir -p /tmp/izm-policy
-          cat > /tmp/izm-policy/map.sh <<'EOF'
+          cat > /tmp/izm-policy/map.sh <<'EOF_MAP'
           #!/bin/bash
           printf '%s\n' \
             $'iqn.test\ttpg1\tLun0\t/backstores/block/iscsi\t/dev/zvol/tank/games\tdefault_tg_pt_gp\ttank/games\toff' \
             $'iqn.test\ttpg1\tLun1\t/backstores/block/rawdisk\t/dev/sdb\tdefault_tg_pt_gp\t\toff' \
             $'iqn.test\ttpg1\tLun2\t/backstores/block/ready\t/dev/zvol/tank/ready\tdefault_tg_pt_gp\ttank/ready\ton'
-          EOF
-          cat > /tmp/izm-policy/unmap.sh <<'EOF'
+          EOF_MAP
+          cat > /tmp/izm-policy/unmap.sh <<'EOF_UNMAP'
           #!/bin/bash
           printf '%s\n' "$*" >> /tmp/izm-policy/calls
-          EOF
+          EOF_UNMAP
           chmod +x /tmp/izm-policy/map.sh /tmp/izm-policy/unmap.sh
           echo 'AUTO_UNMAP=1' > /tmp/izm-policy/settings.cfg
           : > /tmp/izm-policy/calls
@@ -111,6 +132,19 @@ jobs:
 
       - name: Build plugin assets
         run: bash ./scripts/build-release.sh
+
+      - name: Verify packaged page headers
+        run: |
+          set -euo pipefail
+          root='.build/root/usr/local/emhttp/plugins/unraid-iscsi-manager'
+          while IFS= read -r -d '' page; do
+            grep -q '^---$' "$page" || continue
+            header="$(sed -n '1,/^---$/p' "$page")"
+            grep -qx 'Markdown="false"' <<< "$header" || {
+              echo "Missing Markdown=false in packaged page: $page" >&2
+              exit 1
+            }
+          done < <(find "$root" -maxdepth 1 -type f -name '*.page' -print0)
 
       - name: Validate generated plugin XML
         run: |
