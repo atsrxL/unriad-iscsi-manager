@@ -10,9 +10,7 @@ define('IZM_CLONE_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scrip
 
 function izm_clone_run(array $args) {
     $cmd = 'bash ' . escapeshellarg(IZM_CLONE_SCRIPT);
-    foreach ($args as $arg) {
-        $cmd .= ' ' . escapeshellarg((string)$arg);
-    }
+    foreach ($args as $arg) $cmd .= ' ' . escapeshellarg((string)$arg);
     $cmd .= ' 2>&1';
     $out = [];
     $ret = 0;
@@ -32,28 +30,42 @@ function izm_next_clone_leaf($source, array $volumeNames) {
     return $leaf . '-clone';
 }
 
+function izm_volume_anchor($name) {
+    return 'zvol-' . substr(sha1($name), 0, 12);
+}
+
 $message = '';
 $error = '';
+$focusVolume = '';
 [$zfsAvailable, $zfsOutput] = izm_zfs_state();
 $volumes = $zfsAvailable ? izm_load_volumes() : [];
 $volumeNames = array_column($volumes, 'name');
-$selected = trim($_GET['zvol'] ?? $_POST['selected_zvol'] ?? '');
-if ($selected === '' || !in_array($selected, $volumeNames, true)) $selected = $volumeNames[0] ?? '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
     $action = $_POST['action'] ?? '';
+    $selected = trim($_POST['selected_zvol'] ?? '');
     $ret = 0;
     $output = '';
     $handled = true;
 
-    if ($action === 'create_snapshot') {
+    if ($selected !== '' && !in_array($selected, $volumeNames, true) && $action !== 'delete_clone') {
+        $ret = 1;
+        $output = 'Selected ZVOL no longer exists.';
+    } elseif ($action === 'create_snapshot') {
+        $focusVolume = $selected;
         [$ret, $output] = izm_run(['create-snapshot', $selected, trim($_POST['snapshot_name'] ?? '')]);
     } elseif ($action === 'delete_snapshot') {
-        [$ret, $output] = izm_run(['delete-snapshot', trim($_POST['snapshot'] ?? '')]);
+        $snapshot = trim($_POST['snapshot'] ?? '');
+        $focusVolume = strstr($snapshot, '@', true) ?: $selected;
+        [$ret, $output] = izm_run(['delete-snapshot', $snapshot]);
     } elseif ($action === 'clone_snapshot') {
-        [$ret, $output] = izm_run(['clone-snapshot', trim($_POST['snapshot'] ?? ''), trim($_POST['clone_name'] ?? '')]);
+        $snapshot = trim($_POST['snapshot'] ?? '');
+        $focusVolume = strstr($snapshot, '@', true) ?: $selected;
+        [$ret, $output] = izm_run(['clone-snapshot', $snapshot, trim($_POST['clone_name'] ?? '')]);
     } elseif ($action === 'delete_clone') {
-        [$ret, $output] = izm_clone_run(['delete', trim($_POST['clone'] ?? '')]);
+        $clone = trim($_POST['clone'] ?? '');
+        $focusVolume = $selected;
+        [$ret, $output] = izm_clone_run(['delete', $clone]);
     } else {
         $handled = false;
     }
@@ -63,29 +75,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
         else $error = preg_replace('/^ERROR:\s*/m', '', $output ?: 'Operation failed.');
         $volumes = izm_load_volumes();
         $volumeNames = array_column($volumes, 'name');
-        if (!in_array($selected, $volumeNames, true)) $selected = $volumeNames[0] ?? '';
     }
 }
 
-$snapshots = ($zfsAvailable && $selected !== '') ? izm_load_snapshots($selected) : [];
+$snapshotsByVolume = [];
+foreach ($volumes as $v) {
+    $snapshotsByVolume[$v['name']] = izm_load_snapshots($v['name']);
+}
+
 $clonesByOrigin = [];
 foreach ($volumes as $v) {
     $origin = $v['origin'] ?? '';
     if ($origin === '' || $origin === '-') continue;
     $clonesByOrigin[$origin][] = $v;
 }
-
-$selectedVolume = null;
-foreach ($volumes as $v) {
-    if ($v['name'] === $selected) {
-        $selectedVolume = $v;
-        break;
-    }
-}
-
-$directCloneTotal = 0;
-foreach ($snapshots as $s) $directCloneTotal += count($clonesByOrigin[$s['name']] ?? []);
-$nextCloneLeaf = $selected !== '' ? izm_next_clone_leaf($selected, $volumeNames) : 'clone1';
 
 $mappings = $zfsAvailable ? izm_load_iscsi_mappings() : [];
 $mappedByZvol = izm_mappings_by_zvol($mappings);
@@ -96,10 +99,15 @@ izm_styles();
 $csrf = izm_csrf();
 ?>
 <style>
-.izm-snap-toolbar { display:grid; grid-template-columns:minmax(360px,640px) 1fr; gap:18px; align-items:end; }
-.izm-snap-summary { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; align-items:center; padding-bottom:3px; }
-.izm-snapshot-list { display:flex; flex-direction:column; gap:14px; }
-.izm-snapshot-node { border:1px solid rgba(127,127,127,.32); border-radius:8px; overflow:hidden; background:rgba(127,127,127,.025); }
+.izm-volume-list { display:flex; flex-direction:column; gap:18px; margin-top:16px; }
+.izm-volume-block { border:1px solid rgba(127,127,127,.34); border-radius:9px; overflow:hidden; background:rgba(127,127,127,.025); scroll-margin-top:70px; }
+.izm-volume-head { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; padding:14px 16px; border-bottom:1px solid rgba(127,127,127,.22); background:rgba(127,127,127,.045); }
+.izm-volume-name strong { font-size:17px; }
+.izm-volume-badges { display:flex; flex-wrap:wrap; gap:7px; }
+.izm-volume-create { padding:12px 16px; border-bottom:1px solid rgba(127,127,127,.18); }
+.izm-volume-create form { display:grid; grid-template-columns:minmax(260px,480px) auto 1fr; gap:10px; align-items:end; }
+.izm-snapshot-list { display:flex; flex-direction:column; gap:12px; padding:14px 16px 16px; }
+.izm-snapshot-node { border:1px solid rgba(127,127,127,.30); border-radius:8px; overflow:hidden; background:rgba(127,127,127,.018); }
 .izm-snapshot-head { display:grid; grid-template-columns:minmax(300px,1.6fr) repeat(3,minmax(120px,.55fr)) auto; gap:14px; align-items:center; padding:14px 16px; }
 .izm-snapshot-name { min-width:0; }
 .izm-snapshot-name strong { display:block; font-size:15px; overflow-wrap:anywhere; }
@@ -109,9 +117,10 @@ $csrf = izm_csrf();
 .izm-clone-create { display:grid; grid-template-columns:minmax(240px,420px) auto 1fr; gap:10px; align-items:end; padding:11px 16px; border-top:1px solid rgba(127,127,127,.20); background:rgba(127,127,127,.035); }
 .izm-clones { border-top:1px solid rgba(127,127,127,.22); padding:0 16px 10px; }
 .izm-clones-title { font-size:12px; font-weight:600; opacity:.72; padding:10px 0 6px; text-transform:uppercase; letter-spacing:.04em; }
-.izm-clone-row { display:grid; grid-template-columns:minmax(300px,1.5fr) minmax(105px,.45fr) minmax(105px,.45fr) minmax(180px,.7fr) auto; gap:14px; align-items:center; padding:9px 10px; margin:4px 0; border-left:3px solid rgba(127,127,127,.35); background:rgba(127,127,127,.035); border-radius:0 5px 5px 0; }
+.izm-clone-row { display:grid; grid-template-columns:minmax(300px,1.5fr) minmax(105px,.45fr) minmax(105px,.45fr) minmax(190px,.75fr) auto; gap:14px; align-items:center; padding:9px 10px; margin:4px 0; border-left:3px solid rgba(127,127,127,.35); background:rgba(127,127,127,.035); border-radius:0 5px 5px 0; }
 .izm-clone-name { min-width:0; }
 .izm-clone-name code { overflow-wrap:anywhere; white-space:normal; }
+.izm-empty { padding:15px 16px; opacity:.65; }
 .izm-empty-clones { padding:10px 0 2px; font-size:12px; opacity:.60; }
 .izm-danger-btn { border-color:#d9534f !important; color:#d9534f !important; }
 .izm-disabled-note { font-size:11px; opacity:.65; margin-top:4px; text-align:right; }
@@ -123,8 +132,7 @@ $csrf = izm_csrf();
   .izm-clone-name { grid-column:1 / -1; }
 }
 @media (max-width:760px) {
-  .izm-snap-toolbar, .izm-clone-create { grid-template-columns:1fr; }
-  .izm-snap-summary { justify-content:flex-start; }
+  .izm-volume-create form, .izm-clone-create { grid-template-columns:1fr; }
   .izm-snapshot-head, .izm-clone-row { grid-template-columns:1fr; }
   .izm-snapshot-name, .izm-snapshot-actions, .izm-clone-name { grid-column:auto; }
 }
@@ -132,150 +140,172 @@ $csrf = izm_csrf();
 
 <div class="izm-wrap">
   <h2>Snapshot Manager</h2>
-  <div class="izm-sub">Snapshots are the restore points. Clones created from a snapshot are shown directly underneath it, so the dependency is visible before you delete anything.</div>
+  <div class="izm-sub">Snapshots are the restore points. Every ZVOL is shown below with all of its snapshots expanded; clones are shown directly under the snapshot they depend on.</div>
   <?php izm_notices($message, $error, $zfsAvailable, $zfsOutput); ?>
 
   <?php if ($zfsAvailable): ?>
-  <div class="izm-card">
-    <div class="izm-snap-toolbar">
-      <form method="get" class="izm-field">
-        <label>ZVOL</label>
-        <select name="zvol" onchange="this.form.submit()">
-          <?php foreach ($volumes as $v): ?>
-            <option value="<?=izm_h($v['name'])?>" <?=$v['name'] === $selected ? 'selected' : ''?>><?=izm_h($v['name'])?> — <?=izm_h(izm_bytes($v['volsize']))?><?=$v['provision'] === 'Clone' ? ' — clone' : ''?></option>
-          <?php endforeach; ?>
-        </select>
-      </form>
-      <?php if ($selectedVolume): ?>
-      <div class="izm-snap-summary">
-        <span class="izm-pill"><?=count($snapshots)?> snapshot<?=count($snapshots) === 1 ? '' : 's'?></span>
-        <span class="izm-pill"><?=$directCloneTotal?> dependent clone<?=$directCloneTotal === 1 ? '' : 's'?></span>
-        <span class="izm-pill"><?=izm_h(izm_bytes($selectedVolume['volsize']))?></span>
-        <span class="izm-pill"><?=izm_h($selectedVolume['provision'])?></span>
-      </div>
-      <?php endif; ?>
-    </div>
-  </div>
-
-  <?php if ($selected !== ''): ?>
-  <div class="izm-card">
-    <div class="izm-title">Create snapshot</div>
-    <div class="izm-sub">Leave the name blank to generate <code>manual-YYYYMMDD-HHMMSS</code>.</div>
-    <form method="post" class="izm-row">
-      <input type="hidden" name="csrf_token" value="<?=$csrf?>">
-      <input type="hidden" name="action" value="create_snapshot">
-      <input type="hidden" name="selected_zvol" value="<?=izm_h($selected)?>">
-      <div class="izm-field" style="max-width:520px">
-        <label>Snapshot name</label>
-        <input type="text" name="snapshot_name" placeholder="before-update">
-      </div>
-      <input type="submit" value="Create Snapshot">
-    </form>
-  </div>
-
-  <div class="izm-card">
-    <div class="izm-title">Snapshot tree — <code><?=izm_h($selected)?></code></div>
-    <div class="izm-sub"><strong>Unique Used</strong> is the space uniquely pinned by a snapshot. A snapshot with dependent clones cannot be deleted until those clones are removed. Clone deletion is non-recursive and is blocked while the clone is mapped to iSCSI, actively connected, locally busy, or has snapshots of its own.</div>
-
-    <?php if (empty($snapshots)): ?>
-      <div class="izm-sub">No snapshots found for this ZVOL.</div>
+    <?php if (empty($volumes)): ?>
+      <div class="izm-card"><div class="izm-sub">No ZVOLs found.</div></div>
     <?php else: ?>
-      <div class="izm-snapshot-list">
-      <?php foreach ($snapshots as $s):
-        $directClones = $clonesByOrigin[$s['name']] ?? [];
-        $cloneCount = count($directClones);
-        $snapLeaf = strstr($s['name'], '@');
-        if ($snapLeaf === false) $snapLeaf = $s['name'];
+      <div class="izm-volume-list">
+      <?php foreach ($volumes as $v):
+        $volumeName = $v['name'];
+        $snapshots = $snapshotsByVolume[$volumeName] ?? [];
+        $directCloneTotal = 0;
+        foreach ($snapshots as $s) $directCloneTotal += count($clonesByOrigin[$s['name']] ?? []);
+        $nextCloneLeaf = izm_next_clone_leaf($volumeName, $volumeNames);
+        $anchor = izm_volume_anchor($volumeName);
       ?>
-        <div class="izm-snapshot-node">
-          <div class="izm-snapshot-head">
-            <div class="izm-snapshot-name">
-              <strong><i class="fa fa-camera" style="margin-right:7px;opacity:.65"></i><?=izm_h($snapLeaf)?></strong>
-              <div class="izm-snapshot-path"><?=izm_h($s['name'])?></div>
-            </div>
-            <div><span class="izm-stat-label">Created</span><?=izm_h(izm_creation($s['creation']))?></div>
-            <div><span class="izm-stat-label">Unique Used</span><?=izm_h(izm_bytes($s['used']))?></div>
-            <div><span class="izm-stat-label">Referenced</span><?=izm_h(izm_bytes($s['refer']))?></div>
-            <div class="izm-snapshot-actions">
-              <?php if ($cloneCount > 0): ?>
-                <span class="izm-pill izm-pill-warn"><i class="fa fa-code-fork"></i> <?=$cloneCount?> clone<?=$cloneCount === 1 ? '' : 's'?></span>
-                <input type="button" value="Delete Snapshot" class="izm-danger-btn" disabled title="Delete the dependent clones first">
-              <?php else: ?>
-                <form method="post">
-                  <input type="hidden" name="csrf_token" value="<?=$csrf?>">
-                  <input type="hidden" name="action" value="delete_snapshot">
-                  <input type="hidden" name="selected_zvol" value="<?=izm_h($selected)?>">
-                  <input type="hidden" name="snapshot" value="<?=izm_h($s['name'])?>">
-                  <input type="submit" value="Delete Snapshot" class="izm-danger-btn" onclick="return confirm('Delete this snapshot? This cannot be undone.');">
-                </form>
+        <section class="izm-volume-block" id="<?=izm_h($anchor)?>">
+          <div class="izm-volume-head">
+            <div class="izm-volume-name">
+              <strong><i class="fa fa-database" style="margin-right:7px;opacity:.6"></i><code><?=izm_h($volumeName)?></code></strong>
+              <?php if (($v['origin'] ?? '') !== '' && ($v['origin'] ?? '') !== '-'): ?>
+                <div class="izm-small">origin: <?=izm_h($v['origin'])?></div>
               <?php endif; ?>
             </div>
+            <div class="izm-volume-badges">
+              <span class="izm-pill"><?=count($snapshots)?> snapshot<?=count($snapshots) === 1 ? '' : 's'?></span>
+              <span class="izm-pill"><?=$directCloneTotal?> dependent clone<?=$directCloneTotal === 1 ? '' : 's'?></span>
+              <span class="izm-pill"><?=izm_h(izm_bytes($v['volsize']))?></span>
+              <span class="izm-pill"><?=izm_h($v['provision'])?></span>
+            </div>
           </div>
 
-          <form method="post" class="izm-clone-create">
-            <input type="hidden" name="csrf_token" value="<?=$csrf?>">
-            <input type="hidden" name="action" value="clone_snapshot">
-            <input type="hidden" name="selected_zvol" value="<?=izm_h($selected)?>">
-            <input type="hidden" name="snapshot" value="<?=izm_h($s['name'])?>">
-            <div class="izm-field">
-              <label>Create clone <span class="izm-small">(optional custom name)</span></label>
-              <input type="text" name="clone_name" placeholder="auto: <?=izm_h($nextCloneLeaf)?>">
-            </div>
-            <input type="submit" value="Create Clone">
-            <div class="izm-small">Clone is created instantly with ZFS CoW and will appear below this snapshot.</div>
-          </form>
+          <div class="izm-volume-create">
+            <form method="post">
+              <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+              <input type="hidden" name="action" value="create_snapshot">
+              <input type="hidden" name="selected_zvol" value="<?=izm_h($volumeName)?>">
+              <div class="izm-field">
+                <label>Create snapshot <span class="izm-small">— Leave the name blank to generate <code>manual-YYYYMMDD-HHMMSS</code>.</span></label>
+                <input type="text" name="snapshot_name" placeholder="before-update">
+              </div>
+              <input type="submit" value="Create Snapshot">
+              <div class="izm-small">ZVOL: <code><?=izm_h($volumeName)?></code></div>
+            </form>
+          </div>
 
-          <div class="izm-clones">
-            <div class="izm-clones-title">Dependent clones</div>
-            <?php if ($cloneCount === 0): ?>
-              <div class="izm-empty-clones">No clones depend on this snapshot.</div>
-            <?php else: ?>
-              <?php foreach ($directClones as $clone):
-                $cloneName = $clone['name'];
-                $cloneMapped = !empty($mappedByZvol[$cloneName]);
-                $cloneActive = !empty($sessionsByZvol[$cloneName]);
-                $deleteBlocked = $cloneMapped || $cloneActive;
-              ?>
-                <div class="izm-clone-row">
-                  <div class="izm-clone-name">
-                    <span style="opacity:.55;margin-right:6px">↳</span><code><?=izm_h($cloneName)?></code>
-                    <div class="izm-small">origin: <?=izm_h($clone['origin'])?></div>
+          <?php if (empty($snapshots)): ?>
+            <div class="izm-empty">No snapshots yet.</div>
+          <?php else: ?>
+            <div class="izm-snapshot-list">
+            <?php foreach ($snapshots as $s):
+              $directClones = $clonesByOrigin[$s['name']] ?? [];
+              $cloneCount = count($directClones);
+              $snapLeaf = strstr($s['name'], '@');
+              if ($snapLeaf === false) $snapLeaf = $s['name'];
+            ?>
+              <div class="izm-snapshot-node">
+                <div class="izm-snapshot-head">
+                  <div class="izm-snapshot-name">
+                    <strong><i class="fa fa-camera" style="margin-right:7px;opacity:.65"></i><?=izm_h($snapLeaf)?></strong>
+                    <div class="izm-snapshot-path"><?=izm_h($s['name'])?></div>
                   </div>
-                  <div><span class="izm-stat-label">Size</span><?=izm_h(izm_bytes($clone['volsize']))?></div>
-                  <div><span class="izm-stat-label">Used</span><?=izm_h(izm_bytes($clone['used']))?></div>
-                  <div>
-                    <span class="izm-stat-label">iSCSI</span>
-                    <?php if ($cloneActive): ?>
-                      <span class="izm-pill izm-pill-live">Connected</span>
-                      <?php foreach ($sessionsByZvol[$cloneName] as $sess): ?>
-                        <div class="izm-small"><?=izm_h($sess['address'] ?: 'active session')?><?=($sess['initiator'] ?? '') !== '' ? ' · '.izm_h($sess['initiator']) : ''?></div>
-                      <?php endforeach; ?>
-                    <?php elseif ($cloneMapped): ?>
-                      <span class="izm-pill izm-pill-warn">Mapped / Offline</span>
+                  <div><span class="izm-stat-label">Created</span><?=izm_h(izm_creation($s['creation']))?></div>
+                  <div><span class="izm-stat-label">Unique Used</span><?=izm_h(izm_bytes($s['used']))?></div>
+                  <div><span class="izm-stat-label">Referenced</span><?=izm_h(izm_bytes($s['refer']))?></div>
+                  <div class="izm-snapshot-actions">
+                    <?php if ($cloneCount > 0): ?>
+                      <span class="izm-pill izm-pill-warn"><i class="fa fa-code-fork"></i> <?=$cloneCount?> clone<?=$cloneCount === 1 ? '' : 's'?></span>
+                      <input type="button" value="Delete Snapshot" class="izm-danger-btn" disabled title="Delete the dependent clones first">
                     <?php else: ?>
-                      <span class="izm-pill">Not mapped</span>
+                      <form method="post">
+                        <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+                        <input type="hidden" name="action" value="delete_snapshot">
+                        <input type="hidden" name="selected_zvol" value="<?=izm_h($volumeName)?>">
+                        <input type="hidden" name="snapshot" value="<?=izm_h($s['name'])?>">
+                        <input type="submit" value="Delete Snapshot" class="izm-danger-btn" onclick="return confirm('Delete this snapshot? This cannot be undone.');">
+                      </form>
                     <?php endif; ?>
                   </div>
-                  <div>
-                    <form method="post">
-                      <input type="hidden" name="csrf_token" value="<?=$csrf?>">
-                      <input type="hidden" name="action" value="delete_clone">
-                      <input type="hidden" name="selected_zvol" value="<?=izm_h($selected)?>">
-                      <input type="hidden" name="clone" value="<?=izm_h($cloneName)?>">
-                      <input type="submit" value="Delete Clone" class="izm-danger-btn" <?=$deleteBlocked ? 'disabled' : ''?> onclick="return confirm('Delete this clone? All changes stored only in this clone will be destroyed.');">
-                    </form>
-                    <?php if ($cloneActive): ?><div class="izm-disabled-note">Disconnect initiator first</div>
-                    <?php elseif ($cloneMapped): ?><div class="izm-disabled-note">Remove LUN mapping first</div><?php endif; ?>
-                  </div>
                 </div>
-              <?php endforeach; ?>
-            <?php endif; ?>
-          </div>
-        </div>
+
+                <form method="post" class="izm-clone-create">
+                  <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+                  <input type="hidden" name="action" value="clone_snapshot">
+                  <input type="hidden" name="selected_zvol" value="<?=izm_h($volumeName)?>">
+                  <input type="hidden" name="snapshot" value="<?=izm_h($s['name'])?>">
+                  <div class="izm-field">
+                    <label>Create clone <span class="izm-small">(optional custom name)</span></label>
+                    <input type="text" name="clone_name" placeholder="auto: <?=izm_h($nextCloneLeaf)?>">
+                  </div>
+                  <input type="submit" value="Create Clone">
+                  <div class="izm-small">Clone is created instantly with ZFS CoW and will appear below this snapshot.</div>
+                </form>
+
+                <div class="izm-clones">
+                  <div class="izm-clones-title">Dependent clones</div>
+                  <?php if ($cloneCount === 0): ?>
+                    <div class="izm-empty-clones">No clones depend on this snapshot.</div>
+                  <?php else: ?>
+                    <?php foreach ($directClones as $clone):
+                      $cloneName = $clone['name'];
+                      $cloneMapped = !empty($mappedByZvol[$cloneName]);
+                      $cloneActive = !empty($sessionsByZvol[$cloneName]);
+                      $cloneSnapshots = $snapshotsByVolume[$cloneName] ?? [];
+                      $cloneHasSnapshots = !empty($cloneSnapshots);
+                      $deleteBlocked = $cloneMapped || $cloneActive || $cloneHasSnapshots;
+                    ?>
+                      <div class="izm-clone-row">
+                        <div class="izm-clone-name">
+                          <span style="opacity:.55;margin-right:6px">↳</span><code><?=izm_h($cloneName)?></code>
+                          <div class="izm-small">origin: <?=izm_h($clone['origin'])?></div>
+                        </div>
+                        <div><span class="izm-stat-label">Size</span><?=izm_h(izm_bytes($clone['volsize']))?></div>
+                        <div><span class="izm-stat-label">Used</span><?=izm_h(izm_bytes($clone['used']))?></div>
+                        <div>
+                          <span class="izm-stat-label">iSCSI</span>
+                          <?php if ($cloneActive): ?>
+                            <span class="izm-pill izm-pill-live">Connected</span>
+                          <?php elseif ($cloneMapped): ?>
+                            <span class="izm-pill izm-pill-warn">Mapped / Offline</span>
+                          <?php else: ?>
+                            <span class="izm-pill izm-pill-ok">Not mapped</span>
+                          <?php endif; ?>
+                          <?php if ($cloneHasSnapshots): ?>
+                            <span class="izm-pill izm-pill-warn" style="margin-left:4px"><?=count($cloneSnapshots)?> snapshot<?=count($cloneSnapshots) === 1 ? '' : 's'?></span>
+                          <?php endif; ?>
+                        </div>
+                        <div>
+                          <?php if ($deleteBlocked): ?>
+                            <input type="button" value="Delete Clone" class="izm-danger-btn" disabled>
+                            <div class="izm-disabled-note">
+                              <?php if ($cloneActive): ?>Connected
+                              <?php elseif ($cloneMapped): ?>Mapped / Offline
+                              <?php elseif ($cloneHasSnapshots): ?>Delete its snapshots first
+                              <?php endif; ?>
+                            </div>
+                          <?php else: ?>
+                            <form method="post">
+                              <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+                              <input type="hidden" name="action" value="delete_clone">
+                              <input type="hidden" name="selected_zvol" value="<?=izm_h($volumeName)?>">
+                              <input type="hidden" name="clone" value="<?=izm_h($cloneName)?>">
+                              <input type="submit" value="Delete Clone" class="izm-danger-btn" onclick="return confirm('Delete this clone? This destroys the clone ZVOL only and cannot be undone.');">
+                            </form>
+                          <?php endif; ?>
+                        </div>
+                      </div>
+                    <?php endforeach; ?>
+                  <?php endif; ?>
+                </div>
+              </div>
+            <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
+        </section>
       <?php endforeach; ?>
       </div>
     <?php endif; ?>
-  </div>
-  <?php endif; ?>
   <?php endif; ?>
 </div>
+
+<?php if ($focusVolume !== '' && in_array($focusVolume, $volumeNames, true)): ?>
+<script>
+(function(){
+  var el = document.getElementById('<?=izm_h(izm_volume_anchor($focusVolume))?>');
+  if (el && window.location.hash !== '#'+el.id) history.replaceState(null, '', '#'+el.id);
+})();
+</script>
+<?php endif; ?>
