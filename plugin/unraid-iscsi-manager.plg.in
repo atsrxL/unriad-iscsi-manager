@@ -25,12 +25,11 @@
 
 <CHANGES>
 ### @VERSION@
-- Redesign Z Status into a single Pool -> ZVOL -> Snapshot -> Clone resource tree.
-- Show iSCSI mapping state and live initiator IP/IQN directly beside each ZVOL and Clone.
-- Render Clone volumes only beneath the snapshot they depend on, including nested clone/snapshot chains.
-- Remove the duplicate Active Sessions, LUN table, and Space Reclaim/TRIM explanation from Z Status; detailed reclaim guidance remains in Misc.
-- Move TRIM controls into each Pool header and clearly separate persistent Automatic TRIM from one-time Manual TRIM controls.
-- Add clearer Start/Resume, Suspend, and Cancel descriptions without changing the existing safe zpool trim backend behavior.
+- Fix the Z Status white screen seen on Unraid 7.3.x after the resource-tree redesign.
+- Replace page-global status helper functions with request-local closures to avoid eval/runtime collisions in Unraid's .page renderer.
+- Wrap Z Status data loading and tree construction in a Throwable guard so runtime problems are shown in-page instead of being reduced to an empty tab.
+- Keep the Pool -> ZVOL -> Snapshot -> Clone resource tree, live iSCSI initiator display, and separated Automatic/Manual TRIM controls.
+- Keep the duplicate space-reclaim explanation out of Z Status; detailed UNMAP/TRIM guidance remains in Misc.
 </CHANGES>
 
 <FILE Run="/bin/bash">
