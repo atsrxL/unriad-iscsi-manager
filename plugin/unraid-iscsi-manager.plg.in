@@ -55,6 +55,9 @@
     /sbin/installpkg &plugin;/packages/&name;-&version;.txz
     chmod +x &emhttp;/scripts/*.sh 2>/dev/null || true
 
+    # Force Unraid to rebuild the plugin-specific translation cache after an upgrade.
+    rm -f /usr/local/emhttp/languages/zh_CN/&name;.dot 2>/dev/null || true
+
     mkdir -p &plugin;
     if [[ ! -f &plugin;/settings.cfg ]]; then
       echo 'AUTO_UNMAP=0' &gt; &plugin;/settings.cfg
@@ -77,6 +80,7 @@ CRON
 <FILE Run="/bin/bash" Method="remove">
   <INLINE>
     rm -rf &emhttp;
+    rm -f /usr/local/emhttp/languages/zh_CN/&name;.txt /usr/local/emhttp/languages/zh_CN/&name;.dot 2>/dev/null || true
     rm -rf &plugin;
     /usr/local/sbin/update_cron 2>/dev/null || true
     echo "iSCSI ZVOL Manager removed. ZVOLs and snapshots were not modified."
