@@ -25,12 +25,13 @@
 
 <CHANGES>
 ### @VERSION@
-- Fix the persistent Z Status white screen on Unraid 7.3.x by explicitly disabling Unraid Markdown processing for raw plugin pages.
-- Move the heavy Z Status tree renderer out of the .page eval path into a standalone status-tree.php endpoint loaded with fetch/AJAX.
-- If the status backend fails, show the HTTP/backend error inside the tab instead of allowing Unraid to clear the entire panel output.
-- Force Markdown="false" into every packaged plugin .page that has a body, preventing future PHP/HTML pages from being rewritten before eval.
-- Add CI checks that simulate Unraid's eval('?>' . content) behavior for the Z Status wrapper and verify packaged page headers.
-- Preserve the Pool -> ZVOL -> Snapshot -> Clone tree, live iSCSI initiator display, and separated Automatic/Manual TRIM controls.
+- Move all Pool Automatic/Manual TRIM controls out of Z Status and into Misc.
+- Improve LIO backstore-to-ZVOL resolution using configfs device paths, targetcli info/ls output, real-device matching, and pool:zvol backstore-name inference.
+- Show unresolved IQN/LUN mappings as diagnostics instead of silently presenting the affected ZVOLs as unmapped.
+- Add compact action buttons directly to ZVOL, Snapshot, and Clone nodes in the resource tree.
+- Add guided two-step dialogs for Create Snapshot and Create Clone so name fields no longer clutter the tree.
+- Add safe inline Delete Snapshot and Delete Clone actions with dependency, iSCSI, and child-snapshot protection preserved.
+- Keep the standalone AJAX status renderer and Markdown=false packaging safeguards introduced in 2026.08.19c.
 </CHANGES>
 
 <FILE Run="/bin/bash">
