@@ -4,6 +4,9 @@ define('IZM_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/zvo
 define('IZM_ISCSI_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-map.sh');
 define('IZM_SESSIONS_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-sessions.sh');
 
+require_once '/usr/local/emhttp/plugins/unraid-iscsi-manager/include/i18n.php';
+izm_i18n_start();
+
 function izm_h($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
@@ -190,8 +193,6 @@ function izm_load_iscsi_sessions(array $mappings = []) {
                 $effectiveMappedLun = $m[1];
             }
 
-            // targetcli may report the same ACL session that also appears in
-            // configfs dynamic_sessions. Prefer the richer targetcli record.
             $dedupeKey = implode('|', [$initiator, $targetIqn, $targetLun, $effectiveBackstore]);
             if (isset($seen[$dedupeKey])) continue;
             $seen[$dedupeKey] = true;
