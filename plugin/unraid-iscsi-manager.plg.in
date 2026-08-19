@@ -25,13 +25,12 @@
 
 <CHANGES>
 ### @VERSION@
-- Move all Pool Automatic/Manual TRIM controls out of Z Status and into Misc.
-- Improve LIO backstore-to-ZVOL resolution using configfs device paths, targetcli info/ls output, real-device matching, and pool:zvol backstore-name inference.
-- Show unresolved IQN/LUN mappings as diagnostics instead of silently presenting the affected ZVOLs as unmapped.
-- Add compact action buttons directly to ZVOL, Snapshot, and Clone nodes in the resource tree.
-- Add guided two-step dialogs for Create Snapshot and Create Clone so name fields no longer clutter the tree.
-- Add safe inline Delete Snapshot and Delete Clone actions with dependency, iSCSI, and child-snapshot protection preserved.
-- Keep the standalone AJAX status renderer and Markdown=false packaging safeguards introduced in 2026.08.19c.
+- Fix the guided Create Snapshot / Create Clone dialog painting underneath Z Status tree content on Unraid.
+- Move the modal to document.body with an isolated high-z-index backdrop and an opaque theme-matched dialog background.
+- Route create/delete operations through a dedicated JSON status-action.php endpoint instead of mixing mutations with the HTML tree refresh response.
+- Keep the create dialog open and show the exact backend/CSRF/ZFS error when an operation fails.
+- On success, close the dialog, reload the resource tree, and show the operation result at the top of Z Status.
+- Preserve the resource-tree actions, iSCSI mapping diagnostics, and TRIM controls in Misc from 2026.08.19d.
 </CHANGES>
 
 <FILE Run="/bin/bash">
