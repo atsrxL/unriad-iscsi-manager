@@ -25,11 +25,12 @@
 
 <CHANGES>
 ### @VERSION@
-- Redesign Snapshot Manager as a snapshot-to-clone dependency tree so clone relationships are visible at a glance.
-- Show clone size, used space, origin, and iSCSI mapping/session state directly under the parent snapshot.
-- Add safe Delete Clone support. Deletion is non-recursive and refuses non-clones, mapped/active/local-busy ZVOLs, and clones that still have snapshots.
-- Disable snapshot deletion in the UI while dependent clones exist and explain what must be removed first.
-- Keep automatic clone naming while making the next generated clone name visible in the create-clone form.
+- Add Simplified Chinese UI adaptation that follows Unraid's zh_CN locale while keeping English as the fallback.
+- Localize the plugin tab titles through Unraid's native language path and translate plugin content at render time.
+- Remove the ZVOL selector from Snapshot Manager.
+- Show every ZVOL directly on the page, with its snapshot creation control and all snapshots fully expanded underneath.
+- Keep each snapshot's clone dependency tree, iSCSI state, snapshot-delete protection, and safe Clone deletion controls visible in place.
+- After an operation, keep the page focused on the affected ZVOL section.
 </CHANGES>
 
 <FILE Run="/bin/bash">
@@ -54,6 +55,9 @@
     /sbin/installpkg &plugin;/packages/&name;-&version;.txz
     chmod +x &emhttp;/scripts/*.sh 2>/dev/null || true
 
+    # Force Unraid to rebuild the plugin-specific translation cache after an upgrade.
+    rm -f /usr/local/emhttp/languages/zh_CN/&name;.dot 2>/dev/null || true
+
     mkdir -p &plugin;
     if [[ ! -f &plugin;/settings.cfg ]]; then
       echo 'AUTO_UNMAP=0' &gt; &plugin;/settings.cfg
@@ -65,8 +69,6 @@ CRON
     chmod 0644 &plugin;/&name;.cron
     /usr/local/sbin/update_cron 2>/dev/null || true
 
-    # Preserve an already-enabled policy across plugin upgrades and reconcile
-    # immediately instead of waiting for the next cron minute.
     /bin/bash &emhttp;/scripts/iscsi-unmap-policy.sh &gt;/dev/null 2&gt;&amp;1 || true
 
     echo ""
@@ -78,6 +80,7 @@ CRON
 <FILE Run="/bin/bash" Method="remove">
   <INLINE>
     rm -rf &emhttp;
+    rm -f /usr/local/emhttp/languages/zh_CN/&name;.txt /usr/local/emhttp/languages/zh_CN/&name;.dot 2>/dev/null || true
     rm -rf &plugin;
     /usr/local/sbin/update_cron 2>/dev/null || true
     echo "iSCSI ZVOL Manager removed. ZVOLs and snapshots were not modified."
