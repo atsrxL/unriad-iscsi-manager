@@ -31,6 +31,23 @@ for page in "$STAGE/usr/local/emhttp/plugins/$NAME/"*.page; do
   fi
 done
 
+# Z Status deliberately reuses Snapshot Manager's normal page POST handler.
+# Do not reintroduce a standalone mutation endpoint: it behaved differently
+# under Unraid while Snapshot Manager's form path was already proven stable.
+STATUS_PAGE="$STAGE/usr/local/emhttp/plugins/$NAME/unraid-iscsi-manager-status.page"
+grep -Fq 'unraid-iscsi-manager-snapshots' "$STATUS_PAGE" || {
+  echo "Z Status no longer references Snapshot Manager action path" >&2
+  exit 1
+}
+if grep -Fq 'status-action.php' "$STATUS_PAGE"; then
+  echo "Z Status must not use the deprecated status-action.php endpoint" >&2
+  exit 1
+fi
+if [[ -e "$STAGE/usr/local/emhttp/plugins/$NAME/status-action.php" ]]; then
+  echo "Deprecated status-action.php must not be packaged" >&2
+  exit 1
+fi
+
 PACKAGE="$DIST/$NAME-$VERSION.txz"
 PLG="$DIST/$NAME.plg"
 
