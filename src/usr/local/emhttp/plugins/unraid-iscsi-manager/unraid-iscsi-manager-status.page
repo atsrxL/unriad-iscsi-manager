@@ -5,9 +5,9 @@ Tag="fa-dashboard"
 Markdown="false"
 ---
 <div class="izm-wrap" style="max-width:1500px">
-  <h2>ZFS / iSCSI 状态</h2>
+  <h2 id="izm-status-tree-title">Z Status</h2>
   <div id="izm-status-tree-root" style="margin-top:12px">
-    <div style="opacity:.7;padding:12px 0">正在加载 ZFS / iSCSI 状态…</div>
+    <div id="izm-status-tree-loading" style="opacity:.7;padding:12px 0">Loading ZFS / iSCSI status…</div>
   </div>
 </div>
 <script>
@@ -16,6 +16,12 @@ Markdown="false"
   if (!root) return;
   var rawLang = (document.documentElement && document.documentElement.lang) || navigator.language || 'en';
   var lang = /^zh/i.test(rawLang) ? 'zh_CN' : 'en';
+  var title = document.getElementById('izm-status-tree-title');
+  var loading = document.getElementById('izm-status-tree-loading');
+  if (lang === 'zh_CN') {
+    if (title) title.textContent = 'ZFS / iSCSI 状态';
+    if (loading) loading.textContent = '正在加载 ZFS / iSCSI 状态…';
+  }
   var endpoint = '/plugins/unraid-iscsi-manager/status-tree.php?lang=' + encodeURIComponent(lang);
 
   function showError(message) {
