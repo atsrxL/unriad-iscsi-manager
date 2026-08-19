@@ -28,14 +28,18 @@ function izm_i18n_map() {
         'Create a ZVOL on a selected ZFS pool for later use as an iSCSI block backstore.' => '在指定 ZFS Pool 上创建 ZVOL，供后续作为 iSCSI 块设备后端使用。',
         'A ZVOL belongs to a ZFS pool. It cannot be pinned to one physical disk inside a multi-device pool.' => 'ZVOL 属于 ZFS Pool，无法指定固定存放在多盘 Pool 中的某一块物理磁盘上。',
         'Use the current state of one ZVOL as a new base and replace selected same-pool targets with CoW clones. Existing targets are retained as timestamped backup ZVOLs.' => '将某个 ZVOL 当前状态作为新的 Base，并用 CoW Clone 替换同一 Pool 中选定的目标。原目标会保留为带时间戳的备份 ZVOL。',
-        'ZFS pool/ZVOL state plus configured LIO mappings. Active logins are read from <code>targetcli sessions detail</code> and, for demo/dynamic ACL targets, directly from configfs <code>dynamic_sessions</code>.' => '显示 ZFS Pool / ZVOL 状态以及已配置的 LIO 映射。活动登录通过 <code>targetcli sessions detail</code> 获取；对于 demo/dynamic ACL Target，则直接读取 configfs 的 <code>dynamic_sessions</code>。',
+        'ZFS pool/ZVOL state plus configured LIO mappings. Active logins are read from ' => '显示 ZFS Pool / ZVOL 状态以及已配置的 LIO 映射。活动登录通过 ',
+        ' and, for demo/dynamic ACL targets, directly from configfs ' => ' 获取；对于 demo/dynamic ACL Target，则直接读取 configfs 的 ',
         'ACL-backed sessions use targetcli\'s detailed session data. Demo-mode/dynamic ACL sessions are detected through LIO configfs; their initiator IQN is reliable, while the client IP is shown only when it can be correlated unambiguously to the target\'s established TCP connection.' => '使用 ACL 的会话读取 targetcli 的详细数据。Demo-mode/dynamic ACL 会话通过 LIO configfs 检测；Initiator IQN 可以可靠获取，而客户端 IP 仅在能够与 Target 的已建立 TCP 连接明确对应时显示。',
         'Configured LIO target mappings, with live login state and SCSI UNMAP advertisement where available.' => '显示已配置的 LIO Target 映射，并在可用时显示实时登录状态及 SCSI UNMAP 能力。',
-        'There are two different discard layers. Pool TRIM works only on extents that ZFS already knows are free and sends TRIM to the physical SSDs. It does <strong>not</strong> discover free clusters inside NTFS.' => 'Discard 分为两个不同层级。Pool TRIM 只处理 ZFS 已经知道为空闲的 extent，并向物理 SSD 下发 TRIM；它<strong>不会</strong>自行发现 NTFS 内部的空闲簇。',
-        'For a Thick ZVOL, <code>refreservation</code> can continue reserving capacity even after guest discard reduces referenced data. Pool TRIM improves the physical SSD\'s knowledge of free pool extents; it does not remove the ZVOL reservation.' => '对于厚制备 ZVOL，即使客户端 Discard 已降低 Referenced 数据量，<code>refreservation</code> 仍可能继续预留容量。Pool TRIM 只是让物理 SSD 知道哪些 Pool extent 已空闲，并不会取消 ZVOL 的预留空间。',
+        'There are two different discard layers. Pool TRIM works only on extents that ZFS already knows are free and sends TRIM to the physical SSDs. It does ' => 'Discard 分为两个不同层级。Pool TRIM 只处理 ZFS 已经知道为空闲的 extent，并向物理 SSD 下发 TRIM；它',
+        ' discover free clusters inside NTFS.' => '不会自行发现 NTFS 内部的空闲簇。',
+        'For a Thick ZVOL, ' => '对于厚制备 ZVOL，',
+        ' can continue reserving capacity even after guest discard reduces referenced data. Pool TRIM improves the physical SSD\'s knowledge of free pool extents; it does not remove the ZVOL reservation.' => ' 即使客户端 Discard 已降低 Referenced 数据量，仍可能继续预留容量。Pool TRIM 只是让物理 SSD 知道哪些 Pool extent 已空闲，并不会取消 ZVOL 的预留空间。',
 
         'Safe Refresh behavior:' => '安全刷新行为：',
-        'source snapshot → rename each old target to <code>-backup-YYYYMMDD-HHMMSS</code> → clone the new snapshot back to the original target name. The source and targets must have their LIO mappings removed first. Even an offline mapping stays attached to the old block device after a ZVOL rename, so leaving it mapped could make the IQN continue serving the backup instead of the new clone.' => '源 ZVOL 创建快照 → 将每个旧目标重命名为 <code>-backup-YYYYMMDD-HHMMSS</code> → 再从新快照 Clone 回原目标名称。操作前必须先移除源和目标的 LIO 映射。即使映射处于离线状态，ZVOL 重命名后它仍可能继续绑定旧块设备；如果不移除，IQN 可能继续提供备份卷，而不是新 Clone。',
+        'source snapshot → rename each old target to ' => '源 ZVOL 创建快照 → 将每个旧目标重命名为 ',
+        ' → clone the new snapshot back to the original target name. The source and targets must have their LIO mappings removed first. Even an offline mapping stays attached to the old block device after a ZVOL rename, so leaving it mapped could make the IQN continue serving the backup instead of the new clone.' => ' → 再从新快照 Clone 回原目标名称。操作前必须先移除源和目标的 LIO 映射。即使映射处于离线状态，ZVOL 重命名后它仍可能继续绑定旧块设备；如果不移除，IQN 可能继续提供备份卷，而不是新 Clone。',
         'Connected: disconnect initiator and remove LIO mapping before refresh' => '已连接：刷新前先断开 Initiator，并移除 LIO 映射',
         'Mapped / Offline: remove LIO mapping before refresh' => '已映射 / 离线：刷新前先移除 LIO 映射',
         'No other ZVOLs exist in this pool.' => '此 Pool 中没有其他 ZVOL。',
@@ -48,28 +52,45 @@ function izm_i18n_map() {
 
         'LIO target options and client-side maintenance notes that do not belong to ZVOL creation or snapshot management.' => '这里提供与 ZVOL 创建、快照管理无关的 LIO Target 选项和客户端维护功能。',
         'Automatic SCSI UNMAP for ZVOL backstores' => 'ZVOL Backstore 自动启用 SCSI UNMAP',
-        'When enabled, the plugin checks mapped <code>/backstores/block/...</code> entries once per minute. If a block backstore resolves to <code>/dev/zvol/...</code> and UNMAP is not enabled, the plugin sets <code>emulate_tpu=1</code>. Physical disks and block backstores that cannot be correlated to a ZVOL are ignored.' => '启用后，插件每分钟检查一次已映射的 <code>/backstores/block/...</code>。如果 Block Backstore 能对应到 <code>/dev/zvol/...</code> 且尚未启用 UNMAP，插件会设置 <code>emulate_tpu=1</code>。物理磁盘以及无法对应到 ZVOL 的 Block Backstore 会被忽略。',
+        'When enabled, the plugin checks mapped ' => '启用后，插件每分钟检查一次已映射的 ',
+        ' entries once per minute. If a block backstore resolves to ' => '。如果 Block Backstore 能对应到 ',
+        ' and UNMAP is not enabled, the plugin sets ' => ' 且尚未启用 UNMAP，插件会设置 ',
+        '. Physical disks and block backstores that cannot be correlated to a ZVOL are ignored.' => '。物理磁盘以及无法对应到 ZVOL 的 Block Backstore 会被忽略。',
         'Auto-enable UNMAP' => '自动启用 UNMAP',
         'Policy active · checks every minute' => '策略已启用 · 每分钟检查一次',
         'Policy disabled' => '策略未启用',
-        'Turning the policy <strong>Off</strong> stops future enforcement but deliberately does not set existing backstores back to <code>emulate_tpu=0</code>. Use the per-backstore switch below if you want to disable one explicitly.' => '将策略设为<strong>关闭</strong>只会停止后续自动处理，不会把现有 Backstore 自动改回 <code>emulate_tpu=0</code>。如果要明确关闭某个 Backstore，请使用下方的单独开关。',
+        'Turning the policy ' => '将策略设为',
+        ' stops future enforcement but deliberately does not set existing backstores back to ' => '只会停止后续自动处理，不会把现有 Backstore 自动改回 ',
+        '. Use the per-backstore switch below if you want to disable one explicitly.' => '。如果要明确关闭某个 Backstore，请使用下方的单独开关。',
         'SCSI UNMAP / Thin Provisioning' => 'SCSI UNMAP / 精简制备',
-        'Linux LIO exposes SCSI UNMAP to the initiator through the backstore attribute <code>emulate_tpu</code>. Enabling it allows a filesystem such as NTFS to return unused ZVOL ranges to ZFS, provided the underlying ZVOL/block device supports discard.' => 'Linux LIO 通过 Backstore 属性 <code>emulate_tpu</code> 向 Initiator 宣告 SCSI UNMAP。启用后，只要底层 ZVOL / 块设备支持 Discard，NTFS 等文件系统即可把不再使用的 ZVOL 区域返还给 ZFS。',
+        'Linux LIO exposes SCSI UNMAP to the initiator through the backstore attribute ' => 'Linux LIO 通过 Backstore 属性 ',
+        '. Enabling it allows a filesystem such as NTFS to return unused ZVOL ranges to ZFS, provided the underlying ZVOL/block device supports discard.' => ' 向 Initiator 宣告 SCSI UNMAP。启用后，只要底层 ZVOL / 块设备支持 Discard，NTFS 等文件系统即可把不再使用的 ZVOL 区域返还给 ZFS。',
         'No mapped LIO block backstores were detected.' => '未检测到已映射的 LIO Block Backstore。',
         'Mapped LUNs' => '已映射 LUN',
         'Not controlled by auto policy' => '不受自动策略控制',
         'Important:' => '重要：',
-        'changing <code>emulate_tpu</code> changes the live LIO backstore. Windows may cache the disk provisioning capabilities, so disconnect/reconnect the iSCSI session (or remove/re-add the disk) before testing ReTrim. These controls never run <code>blkdiscard</code> and never discard the whole ZVOL.' => '修改 <code>emulate_tpu</code> 会直接改变当前 LIO Backstore。Windows 可能缓存磁盘的制备能力，因此测试 ReTrim 前建议断开并重新连接 iSCSI 会话（或移除后重新添加磁盘）。这些操作绝不会执行 <code>blkdiscard</code>，也不会丢弃整个 ZVOL。',
+        'changing ' => '修改 ',
+        ' changes the live LIO backstore. Windows may cache the disk provisioning capabilities, so disconnect/reconnect the iSCSI session (or remove/re-add the disk) before testing ReTrim. These controls never run ' => ' 会直接改变当前 LIO Backstore。Windows 可能缓存磁盘的制备能力，因此测试 ReTrim 前建议断开并重新连接 iSCSI 会话（或移除后重新添加磁盘）。这些操作绝不会执行 ',
+        ' and never discard the whole ZVOL.' => '，也不会丢弃整个 ZVOL。',
         'Windows: reclaim deleted NTFS space' => 'Windows：回收已删除文件占用的 NTFS 空间',
         'Use this after UNMAP is enabled for the corresponding backstore.' => '请在对应 Backstore 已启用 UNMAP 后执行。',
         'Close applications using the iSCSI disk.' => '关闭正在使用该 iSCSI 磁盘的程序。',
         'Disconnect and reconnect the Windows iSCSI target so Windows re-queries SCSI thin-provisioning / UNMAP support.' => '断开并重新连接 Windows iSCSI Target，让 Windows 重新查询 SCSI 精简制备 / UNMAP 能力。',
-        'Open <strong>PowerShell as Administrator</strong>.' => '以<strong>管理员身份</strong>打开 PowerShell。',
+        'Open ' => '打开 ',
+        'PowerShell as Administrator' => '管理员 PowerShell',
         'Run the ReTrim command for the correct drive letter:' => '对正确的盘符执行 ReTrim：',
         'Alternative command:' => '替代命令：',
         'How snapshots affect reclaim' => '快照对空间回收的影响',
-        'A snapshot taken <em>before</em> ReTrim intentionally preserves blocks that the live ZVOL later discards. In that case the snapshot\'s <strong>Unique Used</strong> can rise while the live ZVOL\'s <strong>Referenced</strong> falls. Deleting that old snapshot is what finally allows its pinned blocks to become free in the ZFS pool.' => '在 ReTrim <em>之前</em>创建的快照会刻意保留之后被实时 ZVOL 丢弃的旧数据块。因此可能出现实时 ZVOL 的 <strong>Referenced</strong> 下降，而快照的 <strong>Unique Used</strong> 上升。只有删除这个旧快照后，被它固定的数据块才最终能够在 ZFS Pool 中释放。',
-        'A snapshot taken <em>after</em> successful ReTrim can instead show a much lower <strong>Referenced Data</strong> value and initially near-zero <strong>Unique Used</strong>. Pool-level <code>zpool trim</code> is a separate final layer: it only informs the physical SSD about extents that ZFS already considers free.' => '成功 ReTrim <em>之后</em>创建的快照，其 <strong>Referenced Data</strong> 通常会明显更低，初始 <strong>Unique Used</strong> 也接近零。Pool 层的 <code>zpool trim</code> 是另一层操作：它只负责通知物理 SSD 哪些 extent 已经被 ZFS 判定为空闲。',
+        'A snapshot taken ' => '在 ',
+        'before' => '之前',
+        ' ReTrim intentionally preserves blocks that the live ZVOL later discards. In that case the snapshot\'s ' => ' ReTrim 创建的快照会刻意保留之后被实时 ZVOL 丢弃的旧数据块。因此快照的 ',
+        ' can rise while the live ZVOL\'s ' => ' 可能上升，而实时 ZVOL 的 ',
+        ' falls. Deleting that old snapshot is what finally allows its pinned blocks to become free in the ZFS pool.' => ' 下降。只有删除这个旧快照后，被它固定的数据块才最终能够在 ZFS Pool 中释放。',
+        'after' => '之后',
+        ' successful ReTrim can instead show a much lower ' => '成功 ReTrim 后创建的快照通常会显示明显更低的 ',
+        ' value and initially near-zero ' => '，初始 ',
+        '. Pool-level ' => ' 也接近零。Pool 层的 ',
+        ' is a separate final layer: it only informs the physical SSD about extents that ZFS already considers free.' => ' 是另一层操作：它只负责通知物理 SSD 哪些 extent 已经被 ZFS 判定为空闲。',
 
         'Create ZVOL' => '创建 ZVOL',
         'Create snapshot' => '创建快照',
@@ -190,14 +211,12 @@ function izm_i18n_map() {
     return $map;
 }
 
-function izm_i18n_translate_output($html) {
+function izm_i18n_emit_script() {
+    static $emitted = false;
     $map = izm_i18n_map();
-    return $map ? strtr($html, $map) : $html;
-}
+    if ($emitted || !$map) return;
+    $emitted = true;
 
-function izm_i18n_start() {
-    static $started = false;
-    if ($started || !izm_i18n_map()) return;
-    $started = true;
-    ob_start('izm_i18n_translate_output');
+    $json = json_encode($map, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+    echo '<script>(function(){var map=' . $json . ';var keys=Object.keys(map).sort(function(a,b){return b.length-a.length;});function tr(s){for(var i=0;i<keys.length;i++){var k=keys[i];if(s.indexOf(k)!==-1)s=s.split(k).join(map[k]);}return s;}function apply(root){var w=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);var nodes=[];while(w.nextNode())nodes.push(w.currentNode);nodes.forEach(function(n){var p=n.parentElement;if(!p||/^(SCRIPT|STYLE|CODE|PRE)$/.test(p.tagName))return;n.nodeValue=tr(n.nodeValue);});root.querySelectorAll("input[type=submit],input[type=button]").forEach(function(el){el.value=tr(el.value);});root.querySelectorAll("[title],[placeholder]").forEach(function(el){if(el.title)el.title=tr(el.title);if(el.placeholder)el.placeholder=tr(el.placeholder);});root.querySelectorAll("[onclick],[onchange]").forEach(function(el){["onclick","onchange"].forEach(function(a){var v=el.getAttribute(a);if(v)el.setAttribute(a,tr(v));});});}function run(){document.querySelectorAll(".izm-wrap").forEach(apply);}if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",run);else setTimeout(run,0);})();</script>';
 }
