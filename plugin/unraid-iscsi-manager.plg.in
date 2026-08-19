@@ -25,12 +25,12 @@
 
 <CHANGES>
 ### @VERSION@
-- Add Simplified Chinese UI adaptation that follows Unraid's zh_CN locale while keeping English as the fallback.
-- Localize the plugin tab titles through Unraid's native language path and translate plugin content at render time.
-- Remove the ZVOL selector from Snapshot Manager.
-- Show every ZVOL directly on the page, with its snapshot creation control and all snapshots fully expanded underneath.
-- Keep each snapshot's clone dependency tree, iSCSI state, snapshot-delete protection, and safe Clone deletion controls visible in place.
-- After an operation, keep the page focused on the affected ZVOL section.
+- Redesign Z Status into a single Pool -> ZVOL -> Snapshot -> Clone resource tree.
+- Show iSCSI mapping state and live initiator IP/IQN directly beside each ZVOL and Clone.
+- Render Clone volumes only beneath the snapshot they depend on, including nested clone/snapshot chains.
+- Remove the duplicate Active Sessions, LUN table, and Space Reclaim/TRIM explanation from Z Status; detailed reclaim guidance remains in Misc.
+- Move TRIM controls into each Pool header and clearly separate persistent Automatic TRIM from one-time Manual TRIM controls.
+- Add clearer Start/Resume, Suspend, and Cancel descriptions without changing the existing safe zpool trim backend behavior.
 </CHANGES>
 
 <FILE Run="/bin/bash">
