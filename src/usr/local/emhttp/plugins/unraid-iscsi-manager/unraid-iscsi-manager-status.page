@@ -30,6 +30,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $zfsAvailable) {
     }
 }
 
+function izm_status_t($en, $zh) {
+    return stripos(izm_i18n_locale(), 'zh_CN') === 0 ? $zh : $en;
+}
+
+function izm_status_iscsi_label(array $mappings, array $sessions) {
+    if (!empty($sessions)) return 'Connected';
+    if (!empty($mappings)) return 'Mapped / Offline';
+    return 'Not mapped';
+}
+
+function izm_status_iscsi_class(array $mappings, array $sessions) {
+    if (!empty($sessions)) return 'izm-pill-live';
+    if (!empty($mappings)) return 'izm-pill-ok';
+    return '';
+}
+
+function izm_status_iscsi_details(array $mappings, array $sessions) {
+    $lines = [];
+    if (!empty($sessions)) {
+        foreach ($sessions as $s) {
+            $ip = trim((string)($s['address'] ?? '')) ?: 'IP unavailable';
+            $iqn = trim((string)($s['initiator'] ?? '')) ?: 'unknown initiator';
+            $state = trim((string)($s['sessionState'] ?? '')) ?: 'open';
+            $lines[] = $ip . ' · ' . $iqn . ' · ' . $state;
+        }
+    } else {
+        foreach ($mappings as $m) {
+            $iqn = trim((string)($m['iqn'] ?? '')) ?: 'unknown target';
+            $lun = trim((string)($m['lun'] ?? '')) ?: 'unknown LUN';
+            $lines[] = $iqn . ' / ' . $lun;
+        }
+    }
+    return array_values(array_unique($lines));
+}
+
+function izm_status_pill($text, $class = '') {
+    return '<span class="izm-pill ' . $class . '">' . izm_h($text) . '</span>';
+}
+
 $pools = $zfsAvailable ? izm_load_pools() : [];
 $poolTrim = $zfsAvailable ? izm_load_pool_trim_info() : [];
 $volumes = $zfsAvailable ? izm_load_volumes() : [];
@@ -39,187 +78,255 @@ $mappedByZvol = izm_mappings_by_zvol($mappings);
 $sessions = $zfsAvailable ? izm_load_iscsi_sessions($mappings) : [];
 $sessionsByZvol = izm_sessions_by_zvol($sessions);
 
-$iqnGroups = [];
-foreach ($mappings as $mapping) {
-    if ($mapping['iqn'] === '') continue;
-    $iqnGroups[$mapping['iqn']][] = $mapping;
+$volumeByName = [];
+$poolVolumeNames = [];
+$snapshotsByVolume = [];
+$snapshotByName = [];
+$clonesByOrigin = [];
+
+foreach ($volumes as $v) {
+    $volumeByName[$v['name']] = $v;
+    $poolVolumeNames[$v['pool']][] = $v['name'];
 }
 
-$sessionsByBackstore = [];
-foreach ($sessions as $session) {
-    $backstore = $session['backstore'] ?? '';
-    if ($backstore !== '') $sessionsByBackstore[$backstore][] = $session;
+foreach ($volumes as $v) {
+    $name = $v['name'];
+    $snaps = izm_load_snapshots($name);
+    $snapshotsByVolume[$name] = $snaps;
+    foreach ($snaps as $s) $snapshotByName[$s['name']] = $s;
+    $origin = $v['origin'] ?? '';
+    if ($origin !== '' && $origin !== '-') $clonesByOrigin[$origin][] = $name;
+}
+
+foreach ($poolVolumeNames as &$names) sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+unset($names);
+foreach ($clonesByOrigin as &$names) sort($names, SORT_NATURAL | SORT_FLAG_CASE);
+unset($names);
+
+function izm_render_iscsi_state($volumeName) {
+    global $mappedByZvol, $sessionsByZvol;
+    $vmaps = $mappedByZvol[$volumeName] ?? [];
+    $vsessions = $sessionsByZvol[$volumeName] ?? [];
+    echo izm_status_pill(izm_status_iscsi_label($vmaps, $vsessions), izm_status_iscsi_class($vmaps, $vsessions));
+    foreach (izm_status_iscsi_details($vmaps, $vsessions) as $line) {
+        echo '<div class="izm-small izm-iscsi-detail">' . izm_h($line) . '</div>';
+    }
+}
+
+function izm_render_volume_tree($volumeName, $depth = 0, array $ancestors = []) {
+    global $volumeByName, $snapshotsByVolume, $clonesByOrigin, $discardInfo;
+
+    if (!isset($volumeByName[$volumeName])) return;
+    if ($depth > 16 || isset($ancestors[$volumeName])) {
+        echo '<div class="izm-tree-warning">Cycle/depth guard reached for <code>' . izm_h($volumeName) . '</code>.</div>';
+        return;
+    }
+    $ancestors[$volumeName] = true;
+
+    $v = $volumeByName[$volumeName];
+    $origin = $v['origin'] ?? '';
+    $isClone = ($origin !== '' && $origin !== '-');
+    $snaps = $snapshotsByVolume[$volumeName] ?? [];
+    $di = $discardInfo[$volumeName] ?? ['supported' => 'unknown'];
+    $roleClass = $isClone ? 'izm-volume-clone' : 'izm-volume-root';
+    $icon = $isClone ? 'fa-code-fork' : 'fa-hdd-o';
+    ?>
+    <div class="izm-tree-volume <?=$roleClass?>" style="--tree-depth:<?=$depth?>">
+      <div class="izm-tree-row izm-volume-row">
+        <div class="izm-tree-primary">
+          <strong><i class="fa <?=$icon?>"></i> <code><?=izm_h($volumeName)?></code></strong>
+          <div class="izm-tree-secondary">
+            <?=izm_h(izm_bytes($v['volsize']))?> · <?=izm_h($v['provision'])?> · <?=izm_h($v['compression'])?> · block <?=izm_h(izm_block($v['volblocksize']))?>
+          </div>
+          <?php if ($isClone): ?><div class="izm-tree-secondary"><?=izm_h(izm_status_t('Origin', '来源'))?>: <code><?=izm_h($origin)?></code></div><?php endif; ?>
+        </div>
+        <div class="izm-tree-cell">
+          <span class="izm-stat-label"><?=izm_h(izm_status_t('Usage', '空间使用'))?></span>
+          <?=izm_h(izm_bytes($v['used']))?>
+          <div class="izm-small"><?=izm_h(izm_bytes($v['refer']))?> <?=izm_h(izm_status_t('referenced', 'Referenced'))?></div>
+        </div>
+        <div class="izm-tree-cell">
+          <span class="izm-stat-label"><?=izm_h(izm_status_t('Snapshots', '快照'))?></span>
+          <?=count($snaps)?>
+        </div>
+        <div class="izm-tree-cell">
+          <span class="izm-stat-label"><?=izm_h(izm_status_t('Discard', 'Discard'))?></span>
+          <?php if (($di['supported'] ?? '') === 'yes'): ?>
+            <?=izm_status_pill('Supported', 'izm-pill-ok')?>
+          <?php elseif (($di['supported'] ?? '') === 'no'): ?>
+            <?=izm_status_pill('No discard', 'izm-pill-warn')?>
+          <?php else: ?>—<?php endif; ?>
+        </div>
+        <div class="izm-tree-cell izm-tree-iscsi">
+          <span class="izm-stat-label"><?=izm_h(izm_status_t('iSCSI / Initiator', 'iSCSI / Initiator'))?></span>
+          <?php izm_render_iscsi_state($volumeName); ?>
+        </div>
+      </div>
+
+      <?php foreach ($snaps as $s):
+        $snapshotName = $s['name'];
+        $cloneNames = $clonesByOrigin[$snapshotName] ?? [];
+        $snapLeaf = strstr($snapshotName, '@');
+        if ($snapLeaf === false) $snapLeaf = $snapshotName;
+      ?>
+      <div class="izm-tree-snapshot" style="--tree-depth:<?=$depth + 1?>">
+        <div class="izm-tree-row izm-snapshot-row">
+          <div class="izm-tree-primary">
+            <strong><i class="fa fa-camera"></i> <?=izm_h($snapLeaf)?></strong>
+            <div class="izm-tree-secondary"><code><?=izm_h($snapshotName)?></code></div>
+          </div>
+          <div class="izm-tree-cell">
+            <span class="izm-stat-label"><?=izm_h(izm_status_t('Created', '创建时间'))?></span>
+            <?=izm_h(izm_creation($s['creation']))?>
+          </div>
+          <div class="izm-tree-cell">
+            <span class="izm-stat-label"><?=izm_h(izm_status_t('Unique Used', '独占使用'))?></span>
+            <?=izm_h(izm_bytes($s['used']))?>
+          </div>
+          <div class="izm-tree-cell">
+            <span class="izm-stat-label"><?=izm_h(izm_status_t('Referenced', 'Referenced 数据'))?></span>
+            <?=izm_h(izm_bytes($s['refer']))?>
+          </div>
+          <div class="izm-tree-cell">
+            <span class="izm-stat-label">Clone</span>
+            <?=count($cloneNames)?>
+          </div>
+        </div>
+
+        <?php foreach ($cloneNames as $cloneName): ?>
+          <?php izm_render_volume_tree($cloneName, $depth + 2, $ancestors); ?>
+        <?php endforeach; ?>
+      </div>
+      <?php endforeach; ?>
+    </div>
+    <?php
 }
 
 izm_styles();
 $csrf = izm_csrf();
 ?>
+<style>
+.izm-resource-tree { display:flex; flex-direction:column; gap:18px; }
+.izm-pool-node { border:1px solid rgba(127,127,127,.32); border-radius:9px; overflow:hidden; background:rgba(127,127,127,.025); }
+.izm-pool-head { display:grid; grid-template-columns:minmax(320px,1fr) minmax(440px,.9fr); gap:18px; padding:15px 17px; background:rgba(127,127,127,.045); border-bottom:1px solid rgba(127,127,127,.22); }
+.izm-pool-name { font-size:17px; font-weight:600; }
+.izm-pool-meta { display:flex; flex-wrap:wrap; gap:7px; margin-top:9px; }
+.izm-trim-box { display:flex; flex-direction:column; gap:8px; }
+.izm-trim-line { display:grid; grid-template-columns:110px minmax(150px,auto) 1fr; gap:10px; align-items:center; }
+.izm-trim-label { font-weight:600; }
+.izm-trim-note { font-size:12px; opacity:.7; line-height:1.35; }
+.izm-trim-buttons { display:flex; gap:7px; flex-wrap:wrap; }
+.izm-trim-buttons form { margin:0; }
+.izm-pool-body { padding:8px 0 13px; }
+.izm-pool-empty { padding:14px 18px; opacity:.7; }
+.izm-tree-volume, .izm-tree-snapshot { margin-left:calc(16px + (var(--tree-depth) * 18px)); margin-right:16px; position:relative; }
+.izm-tree-volume:before, .izm-tree-snapshot:before { content:""; position:absolute; left:-12px; top:0; bottom:0; border-left:1px solid rgba(127,127,127,.25); }
+.izm-tree-volume + .izm-tree-volume { margin-top:8px; }
+.izm-tree-snapshot { margin-top:7px; }
+.izm-tree-row { display:grid; grid-template-columns:minmax(310px,1.35fr) minmax(120px,.45fr) minmax(95px,.32fr) minmax(120px,.38fr) minmax(300px,1fr); gap:13px; align-items:start; padding:10px 12px; border-radius:6px; }
+.izm-volume-row { background:rgba(127,127,127,.045); border-left:3px solid rgba(127,127,127,.38); }
+.izm-volume-clone > .izm-volume-row { background:rgba(127,127,127,.028); border-left-color:rgba(0,123,255,.35); }
+.izm-snapshot-row { background:rgba(127,127,127,.018); border-left:2px solid rgba(127,127,127,.22); }
+.izm-tree-primary { min-width:0; }
+.izm-tree-primary strong { display:block; overflow-wrap:anywhere; }
+.izm-tree-primary .fa { width:17px; opacity:.62; text-align:center; margin-right:4px; }
+.izm-tree-secondary { font-size:12px; opacity:.68; margin-top:4px; overflow-wrap:anywhere; }
+.izm-tree-cell { min-width:0; }
+.izm-stat-label { display:block; font-size:11px; opacity:.6; text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+.izm-tree-iscsi { overflow-wrap:anywhere; }
+.izm-iscsi-detail { margin-top:5px; white-space:normal; }
+.izm-tree-warning { margin:8px 18px; padding:8px 10px; border:1px solid rgba(255,193,7,.4); border-radius:5px; }
+@media (max-width:1250px) {
+  .izm-pool-head { grid-template-columns:1fr; }
+  .izm-tree-row { grid-template-columns:1fr 1fr; }
+  .izm-tree-primary, .izm-tree-iscsi { grid-column:1 / -1; }
+}
+@media (max-width:760px) {
+  .izm-trim-line { grid-template-columns:1fr; }
+  .izm-tree-volume, .izm-tree-snapshot { margin-left:calc(8px + (var(--tree-depth) * 10px)); margin-right:8px; }
+  .izm-tree-row { grid-template-columns:1fr; }
+  .izm-tree-primary, .izm-tree-iscsi { grid-column:auto; }
+}
+</style>
+
 <div class="izm-wrap">
   <h2>Z Status</h2>
-  <div class="izm-sub">ZFS pool/ZVOL state plus configured LIO mappings. Active logins are read from <code>targetcli sessions detail</code> and, for demo/dynamic ACL targets, directly from configfs <code>dynamic_sessions</code>.</div>
+  <div class="izm-sub"><?=izm_h(izm_status_t('Pool → ZVOL → Snapshot → Clone resource tree, including current iSCSI mapping and initiator login information.', '按 Pool → ZVOL → 快照 → Clone 的层级显示资源关系，并直接显示当前 iSCSI 映射及 Initiator 登录信息。'))?></div>
   <?php izm_notices($message, $error, $zfsAvailable, $zfsOutput); ?>
 
   <?php if ($zfsAvailable): ?>
-  <div class="izm-card">
-    <div class="izm-title">ZPOOLs</div>
+  <div class="izm-resource-tree">
     <?php if (empty($pools)): ?>
-      <div class="izm-sub">No ZFS pools found.</div>
+      <div class="izm-card"><div class="izm-sub"><?=izm_h(izm_status_t('No ZFS pools found.', '未找到 ZFS Pool。'))?></div></div>
     <?php else: ?>
-    <table class="izm-table">
-      <thead><tr><th>Pool</th><th>Size</th><th>Allocated</th><th>Free</th><th>Health</th><th>Autotrim</th><th>TRIM</th></tr></thead>
-      <tbody>
-      <?php foreach ($pools as $p): $auto = $poolTrim[$p['name']]['autotrim'] ?? 'unknown'; ?>
-        <tr>
-          <td><code><?=izm_h($p['name'])?></code></td>
-          <td><?=izm_h(izm_bytes($p['size']))?></td>
-          <td><?=izm_h(izm_bytes($p['alloc']))?></td>
-          <td><?=izm_h(izm_bytes($p['free']))?></td>
-          <td><span class="izm-pill <?=strtoupper($p['health']) === 'ONLINE' ? 'izm-pill-ok' : 'izm-pill-warn'?>"><?=izm_h($p['health'])?></span></td>
-          <td>
-            <form method="post" class="izm-actions">
-              <input type="hidden" name="csrf_token" value="<?=$csrf?>">
-              <input type="hidden" name="action" value="set_autotrim">
-              <input type="hidden" name="pool" value="<?=izm_h($p['name'])?>">
-              <select name="autotrim" onchange="this.form.submit()">
-                <option value="off" <?=$auto === 'off' ? 'selected' : ''?>>Off</option>
-                <option value="on" <?=$auto === 'on' ? 'selected' : ''?>>On</option>
-              </select>
-            </form>
-          </td>
-          <td>
-            <div class="izm-actions">
-              <?php foreach ([['start','Run / Resume'], ['suspend','Suspend'], ['cancel','Cancel']] as $ta): ?>
-              <form method="post">
-                <input type="hidden" name="csrf_token" value="<?=$csrf?>">
-                <input type="hidden" name="action" value="pool_trim">
-                <input type="hidden" name="pool" value="<?=izm_h($p['name'])?>">
-                <input type="hidden" name="trim_action" value="<?=izm_h($ta[0])?>">
-                <input type="submit" value="<?=izm_h($ta[1])?>" <?=$ta[0] === 'start' ? 'onclick="return confirm(\'Start or resume manual TRIM for this pool?\');"' : ''?>>
-              </form>
-              <?php endforeach; ?>
-            </div>
-          </td>
-        </tr>
-      <?php endforeach; ?>
-      </tbody>
-    </table>
-    <?php endif; ?>
-  </div>
-
-  <div class="izm-card">
-    <div class="izm-title">ZVOLs</div>
-    <?php if (empty($volumes)): ?>
-      <div class="izm-sub">No ZVOLs found.</div>
-    <?php else: ?>
-    <table class="izm-table">
-      <thead><tr><th>Name</th><th>Pool</th><th>Size</th><th>ZFS Used</th><th>Referenced</th><th>Provision</th><th>Compression</th><th>Block</th><th>Origin</th><th>Discard</th><th>iSCSI</th></tr></thead>
-      <tbody>
-      <?php foreach ($volumes as $v):
-        $vmaps = $mappedByZvol[$v['name']] ?? [];
-        $vsessions = $sessionsByZvol[$v['name']] ?? [];
-        $di = $discardInfo[$v['name']] ?? ['supported' => 'unknown', 'max' => '', 'granularity' => ''];
+      <?php foreach ($pools as $p):
+        $poolName = $p['name'];
+        $allPoolNames = $poolVolumeNames[$poolName] ?? [];
+        $rootNames = [];
+        foreach ($allPoolNames as $name) {
+            $origin = $volumeByName[$name]['origin'] ?? '';
+            if ($origin === '' || $origin === '-' || !isset($snapshotByName[$origin])) $rootNames[] = $name;
+        }
+        if (empty($rootNames) && !empty($allPoolNames)) $rootNames = $allPoolNames;
+        $auto = $poolTrim[$poolName]['autotrim'] ?? 'unknown';
       ?>
-        <tr>
-          <td><code><?=izm_h($v['name'])?></code></td>
-          <td><?=izm_h($v['pool'])?></td>
-          <td><?=izm_h(izm_bytes($v['volsize']))?></td>
-          <td><?=izm_h(izm_bytes($v['used']))?></td>
-          <td><?=izm_h(izm_bytes($v['refer']))?></td>
-          <td><span class="izm-pill"><?=izm_h($v['provision'])?></span></td>
-          <td><?=izm_h($v['compression'])?></td>
-          <td><?=izm_h(izm_block($v['volblocksize']))?></td>
-          <td><?=($v['origin'] === '' || $v['origin'] === '-') ? '—' : '<code>'.izm_h($v['origin']).'</code>'?></td>
-          <td>
-            <?php if ($di['supported'] === 'yes'): ?>
-              <span class="izm-pill izm-pill-ok">Supported</span>
-              <?php if ($di['max'] !== ''): ?><div class="izm-small">max <?=izm_h(izm_bytes($di['max']))?></div><?php endif; ?>
-            <?php elseif ($di['supported'] === 'no'): ?>
-              <span class="izm-pill izm-pill-warn">No discard</span>
-            <?php else: ?>—<?php endif; ?>
-          </td>
-          <td>
-            <?php if (!empty($vsessions)): ?>
-              <span class="izm-pill izm-pill-live">Connected</span>
-              <?php foreach ($vsessions as $s): ?>
-                <div class="izm-small"><?=izm_h($s['address'] ?: 'IP unavailable')?> · <?=izm_h($s['initiator'])?></div>
-              <?php endforeach; ?>
-            <?php elseif (!empty($vmaps)): ?>
-              <span class="izm-pill izm-pill-ok">Mapped / Offline</span>
-              <?php foreach ($vmaps as $m): ?>
-                <div class="izm-small"><?=izm_h($m['iqn'])?> / <?=izm_h($m['lun'])?></div>
-              <?php endforeach; ?>
-            <?php else: ?>—<?php endif; ?>
-          </td>
-        </tr>
-      <?php endforeach; ?>
-      </tbody>
-    </table>
-    <?php endif; ?>
-  </div>
-
-  <div class="izm-card">
-    <div class="izm-title">Active Sessions</div>
-    <div class="izm-sub">ACL-backed sessions use targetcli's detailed session data. Demo-mode/dynamic ACL sessions are detected through LIO configfs; their initiator IQN is reliable, while the client IP is shown only when it can be correlated unambiguously to the target's established TCP connection.</div>
-    <?php if (empty($sessions)): ?>
-      <div class="izm-sub">No open iSCSI sessions detected by targetcli or configfs.</div>
-    <?php else: ?>
-      <table class="izm-table">
-        <thead><tr><th>SID</th><th>Target / LUN</th><th>ZVOL</th><th>Initiator IQN</th><th>Initiator IP</th><th>Session</th><th>Connection</th><th>Mode</th></tr></thead>
-        <tbody>
-        <?php foreach ($sessions as $s): ?>
-          <tr>
-            <td><?=izm_h($s['sid'])?></td>
-            <td><code><?=izm_h($s['targetIqn'] ?: 'unknown target')?></code><div class="izm-small"><?=izm_h($s['targetLun'] ?: ('mapped-lun '.$s['mappedLun']))?></div></td>
-            <td><?=($s['zvol'] ?? '') !== '' ? '<code>'.izm_h($s['zvol']).'</code>' : izm_h($s['backstore'])?></td>
-            <td><code><?=izm_h($s['initiator'])?></code></td>
-            <td><?=izm_h($s['address'] ?: 'unavailable')?><div class="izm-small"><?=izm_h($s['transport'])?><?=$s['dynamic'] ? ' · dynamic' : ''?></div></td>
-            <td><span class="izm-pill izm-pill-live"><?=izm_h($s['sessionState'] ?: 'open')?></span></td>
-            <td><?=izm_h($s['connectionState'] ?: 'unknown')?></td>
-            <td><?=izm_h($s['mode'])?></td>
-          </tr>
-        <?php endforeach; ?>
-        </tbody>
-      </table>
-    <?php endif; ?>
-  </div>
-
-  <div class="izm-card">
-    <div class="izm-title">LUNs</div>
-    <div class="izm-sub">Configured LIO target mappings, with live login state and SCSI UNMAP advertisement where available.</div>
-    <?php if (empty($iqnGroups)): ?>
-      <div class="izm-sub">No IQN/LUN mappings detected under <code>/sys/kernel/config/target/iscsi</code>.</div>
-    <?php else: ?>
-      <div class="izm-lun-tree">
-      <?php foreach ($iqnGroups as $iqn => $items): ?>
-        <div class="izm-iqn"><span class="izm-dot">●</span><code><?=izm_h($iqn)?></code></div>
-        <?php $hasLun = false; foreach ($items as $m): if ($m['lun'] === '') continue; $hasLun = true; $live = $sessionsByBackstore[$m['backstore']] ?? []; ?>
-          <div class="izm-lun-row">
-            <div><strong><?=izm_h($m['lun'])?></strong></div>
-            <div>→ <code><?=izm_h($m['backstore'])?></code></div>
-            <div class="izm-lun-device"><?php if ($m['zvol'] !== ''): ?><code><?=izm_h($m['zvol'])?></code><?php else: ?><?=izm_h($m['device'] ?: 'unknown device')?><?php endif; ?></div>
-            <div>
-              <?php if (!empty($live)): ?>
-                <span class="izm-pill izm-pill-live">Connected</span>
-                <?php foreach ($live as $s): ?><div class="izm-small"><?=izm_h($s['address'] ?: 'IP unavailable')?> · <?=izm_h($s['initiator'])?></div><?php endforeach; ?>
-              <?php else: ?>
-                <span class="izm-pill">Offline</span>
-              <?php endif; ?>
-              <div class="izm-small">ALUA <?=izm_h($m['alua'] ?: 'default_tg_pt_gp')?> · UNMAP <?=izm_h($m['unmap'] ?: 'unknown')?></div>
+      <section class="izm-pool-node">
+        <div class="izm-pool-head">
+          <div>
+            <div class="izm-pool-name"><i class="fa fa-database" style="opacity:.65;margin-right:7px"></i><code><?=izm_h($poolName)?></code></div>
+            <div class="izm-pool-meta">
+              <span class="izm-pill <?=strtoupper($p['health']) === 'ONLINE' ? 'izm-pill-ok' : 'izm-pill-warn'?>"><?=izm_h($p['health'])?></span>
+              <span class="izm-pill"><?=izm_h(izm_bytes($p['size']))?> <?=izm_h(izm_status_t('total', '总容量'))?></span>
+              <span class="izm-pill"><?=izm_h(izm_bytes($p['alloc']))?> <?=izm_h(izm_status_t('allocated', '已分配'))?></span>
+              <span class="izm-pill"><?=izm_h(izm_bytes($p['free']))?> <?=izm_h(izm_status_t('free', '可用'))?></span>
+              <span class="izm-pill"><?=count($allPoolNames)?> ZVOL<?=count($allPoolNames) === 1 ? '' : 's'?></span>
             </div>
           </div>
-        <?php endforeach; ?>
-        <?php if (!$hasLun): ?><div class="izm-lun-row"><div class="izm-small">No LUNs configured</div></div><?php endif; ?>
-      <?php endforeach; ?>
-      </div>
-    <?php endif; ?>
-  </div>
 
-  <div class="izm-card">
-    <div class="izm-title">Space Reclaim / TRIM</div>
-    <div class="izm-sub">There are two different discard layers. Pool TRIM works only on extents that ZFS already knows are free and sends TRIM to the physical SSDs. It does <strong>not</strong> discover free clusters inside NTFS.</div>
-    <div class="izm-warn"><strong>ZVOL:</strong> deleting a file in NTFS/ext4 only marks blocks free inside that filesystem. ZFS cannot know those blocks are free until the client sends discard/UNMAP. On Windows run <span class="izm-code">Optimize-Volume -DriveLetter X -ReTrim -Verbose</span> (or <span class="izm-code">defrag X: /L</span>). The LIO mapping should show <strong>UNMAP on</strong> and the ZVOL should show <strong>Discard Supported</strong>.</div>
-    <div class="izm-warn"><strong>Snapshots:</strong> there is no safe “snapshot TRIM”. A snapshot intentionally pins the old blocks. In Snapshot Manager, <strong>Unique Used</strong> is the space uniquely held by that snapshot; <strong>Referenced Data</strong> is merely how much data is visible from the snapshot.</div>
-    <div class="izm-sub">For a Thick ZVOL, <code>refreservation</code> can continue reserving capacity even after guest discard reduces referenced data. Pool TRIM improves the physical SSD's knowledge of free pool extents; it does not remove the ZVOL reservation.</div>
+          <div class="izm-trim-box">
+            <div class="izm-trim-line">
+              <div class="izm-trim-label"><?=izm_h(izm_status_t('Automatic TRIM', '自动 TRIM'))?></div>
+              <form method="post" class="izm-actions">
+                <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+                <input type="hidden" name="action" value="set_autotrim">
+                <input type="hidden" name="pool" value="<?=izm_h($poolName)?>">
+                <select name="autotrim" onchange="this.form.submit()">
+                  <option value="off" <?=$auto === 'off' ? 'selected' : ''?>>Off</option>
+                  <option value="on" <?=$auto === 'on' ? 'selected' : ''?>>On</option>
+                </select>
+              </form>
+              <div class="izm-trim-note"><?=izm_h(izm_status_t('Persistent pool setting. ZFS automatically trims extents it already knows are free.', '持续生效的 Pool 设置。ZFS 会自动向底层设备 TRIM 它已经确认空闲的 extent。'))?></div>
+            </div>
+            <div class="izm-trim-line">
+              <div class="izm-trim-label"><?=izm_h(izm_status_t('Manual TRIM', '手动 TRIM'))?></div>
+              <div class="izm-trim-buttons">
+                <?php foreach ([['start', izm_status_t('Start / Resume', '开始 / 继续')], ['suspend', izm_status_t('Suspend', '暂停')], ['cancel', izm_status_t('Cancel', '取消')]] as $ta): ?>
+                <form method="post">
+                  <input type="hidden" name="csrf_token" value="<?=$csrf?>">
+                  <input type="hidden" name="action" value="pool_trim">
+                  <input type="hidden" name="pool" value="<?=izm_h($poolName)?>">
+                  <input type="hidden" name="trim_action" value="<?=izm_h($ta[0])?>">
+                  <input type="submit" value="<?=izm_h($ta[1])?>" <?php if ($ta[0] === 'start'): ?>onclick="return confirm('<?=izm_h(izm_status_t('Start or resume manual TRIM for this pool?', '确定开始或继续此 Pool 的手动 TRIM 任务？'))?>');"<?php elseif ($ta[0] === 'suspend'): ?>onclick="return confirm('<?=izm_h(izm_status_t('Suspend the current manual TRIM job for this pool?', '确定暂停此 Pool 当前的手动 TRIM 任务？'))?>');"<?php else: ?>onclick="return confirm('<?=izm_h(izm_status_t('Cancel the current manual TRIM job for this pool? This does not change Automatic TRIM.', '确定取消此 Pool 当前的手动 TRIM 任务？这不会修改自动 TRIM 设置。'))?>');"<?php endif; ?>>
+                </form>
+                <?php endforeach; ?>
+              </div>
+              <div class="izm-trim-note"><?=izm_h(izm_status_t('One-time pool job. Suspend pauses that job; Start / Resume continues it; Cancel stops it. This is separate from Automatic TRIM.', '一次性的 Pool TRIM 任务：暂停只暂停当前任务；开始 / 继续会启动或恢复；取消会终止当前任务。它与自动 TRIM 设置彼此独立。'))?></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="izm-pool-body">
+          <?php if (empty($rootNames)): ?>
+            <div class="izm-pool-empty"><?=izm_h(izm_status_t('No ZVOLs found in this pool.', '此 Pool 中没有 ZVOL。'))?></div>
+          <?php else: ?>
+            <?php foreach ($rootNames as $rootName): ?>
+              <?php izm_render_volume_tree($rootName); ?>
+            <?php endforeach; ?>
+          <?php endif; ?>
+        </div>
+      </section>
+      <?php endforeach; ?>
+    <?php endif; ?>
   </div>
   <?php endif; ?>
 </div>
