@@ -4,60 +4,188 @@ Type="php"
 Tag="fa-dashboard"
 Markdown="false"
 ---
+<style>
+.izm-guide-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.42);z-index:10020;display:none;align-items:center;justify-content:center;padding:20px}.izm-guide-backdrop.open{display:flex}.izm-guide-dialog{width:min(560px,100%);background:var(--background,#fff);color:inherit;border:1px solid rgba(127,127,127,.35);border-radius:9px;box-shadow:0 16px 60px rgba(0,0,0,.28);overflow:hidden}.izm-guide-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(127,127,127,.22)}.izm-guide-head strong{font-size:17px}.izm-guide-close{font-size:22px;line-height:1;border:0;background:transparent;color:inherit;cursor:pointer}.izm-guide-body{padding:16px}.izm-guide-source{padding:9px 10px;border:1px solid rgba(127,127,127,.24);border-radius:6px;background:rgba(127,127,127,.04);overflow-wrap:anywhere}.izm-guide-field{margin-top:15px}.izm-guide-field label{display:block;font-weight:600;margin-bottom:6px}.izm-guide-field input{width:100%;box-sizing:border-box}.izm-guide-note{font-size:12px;opacity:.72;line-height:1.5;margin-top:6px}.izm-guide-summary{display:none}.izm-guide-summary.open{display:block}.izm-guide-step1.hidden{display:none}.izm-guide-foot{display:flex;justify-content:space-between;gap:8px;padding:12px 16px;border-top:1px solid rgba(127,127,127,.22)}.izm-guide-foot-right{display:flex;gap:8px}.izm-guide-secondary{opacity:.82}
+</style>
 <div class="izm-wrap" style="max-width:1500px">
   <h2 id="izm-status-tree-title">Z Status</h2>
   <div id="izm-status-tree-root" style="margin-top:12px">
     <div id="izm-status-tree-loading" style="opacity:.7;padding:12px 0">Loading ZFS / iSCSI status…</div>
   </div>
 </div>
+
+<div id="izm-guide" class="izm-guide-backdrop" aria-hidden="true">
+  <div class="izm-guide-dialog" role="dialog" aria-modal="true" aria-labelledby="izm-guide-title">
+    <div class="izm-guide-head"><strong id="izm-guide-title"></strong><button type="button" class="izm-guide-close" id="izm-guide-close">×</button></div>
+    <div class="izm-guide-body">
+      <div class="izm-guide-step1" id="izm-guide-step1">
+        <div id="izm-guide-source-label" class="izm-guide-note" style="margin:0 0 6px"></div>
+        <div class="izm-guide-source"><code id="izm-guide-source"></code></div>
+        <div class="izm-guide-field">
+          <label id="izm-guide-name-label" for="izm-guide-name"></label>
+          <input id="izm-guide-name" type="text" autocomplete="off">
+          <div class="izm-guide-note" id="izm-guide-name-note"></div>
+        </div>
+      </div>
+      <div class="izm-guide-summary" id="izm-guide-summary">
+        <div class="izm-guide-note" id="izm-guide-summary-title" style="margin:0 0 7px"></div>
+        <div class="izm-guide-source" id="izm-guide-summary-text"></div>
+      </div>
+    </div>
+    <div class="izm-guide-foot">
+      <button type="button" class="izm-guide-secondary" id="izm-guide-cancel"></button>
+      <div class="izm-guide-foot-right">
+        <button type="button" class="izm-guide-secondary" id="izm-guide-back" style="display:none"></button>
+        <button type="button" id="izm-guide-next"></button>
+        <button type="button" id="izm-guide-confirm" style="display:none"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function(){
   var root = document.getElementById('izm-status-tree-root');
   if (!root) return;
   var rawLang = (document.documentElement && document.documentElement.lang) || navigator.language || 'en';
   var lang = /^zh/i.test(rawLang) ? 'zh_CN' : 'en';
+  var zh = lang === 'zh_CN';
   var title = document.getElementById('izm-status-tree-title');
   var loading = document.getElementById('izm-status-tree-loading');
-  if (lang === 'zh_CN') {
+  if (zh) {
     if (title) title.textContent = 'ZFS / iSCSI 状态';
     if (loading) loading.textContent = '正在加载 ZFS / iSCSI 状态…';
   }
   var endpoint = '/plugins/unraid-iscsi-manager/status-tree.php?lang=' + encodeURIComponent(lang);
 
+  function esc(value) {
+    return String(value == null ? '' : value).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c];});
+  }
   function showError(message) {
     root.innerHTML = '<div style="white-space:pre-wrap;border:1px solid rgba(220,53,69,.45);background:rgba(220,53,69,.10);border-radius:6px;padding:12px 14px">' +
-      '<strong>' + (lang === 'zh_CN' ? 'Z Status 加载失败' : 'Failed to load Z Status') + '</strong><br>' +
-      String(message).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c];}) + '</div>';
+      '<strong>' + (zh ? 'Z Status 加载失败' : 'Failed to load Z Status') + '</strong><br>' + esc(message) + '</div>';
   }
-
+  function csrf() {
+    var node = root.querySelector('[data-izm-csrf]');
+    return node ? node.getAttribute('data-izm-csrf') || '' : '';
+  }
   async function loadStatus(options) {
     options = options || {};
     try {
       var response = await fetch(endpoint, {
-        method: options.method || 'GET',
-        body: options.body || null,
-        credentials: 'same-origin',
-        cache: 'no-store',
-        headers: {'X-Requested-With':'XMLHttpRequest'}
+        method: options.method || 'GET', body: options.body || null,
+        credentials: 'same-origin', cache: 'no-store', headers: {'X-Requested-With':'XMLHttpRequest'}
       });
       var text = await response.text();
       if (!response.ok) throw new Error('HTTP ' + response.status + (text ? '\n' + text.slice(0, 2000) : ''));
-      if (!text.trim()) throw new Error(lang === 'zh_CN' ? '后端返回空响应。请查看 Unraid syslog / 浏览器控制台。' : 'Backend returned an empty response. Check Unraid syslog / browser console.');
+      if (!text.trim()) throw new Error(zh ? '后端返回空响应。' : 'Backend returned an empty response.');
       root.innerHTML = text;
     } catch (error) {
       console.error('unraid-iscsi-manager Z Status:', error);
       showError(error && error.message ? error.message : error);
     }
   }
+  async function postAction(fields) {
+    var body = new FormData();
+    body.append('csrf_token', csrf());
+    Object.keys(fields).forEach(function(k){ body.append(k, fields[k]); });
+    await loadStatus({method:'POST', body:body});
+  }
 
-  root.addEventListener('submit', function(event){
-    var form = event.target;
-    if (!(form instanceof HTMLFormElement) || !form.classList.contains('izm-status-form')) return;
-    event.preventDefault();
-    var confirmText = form.getAttribute('data-confirm');
-    if (confirmText && !window.confirm(confirmText)) return;
-    loadStatus({method:'POST', body:new FormData(form)});
+  var modal = document.getElementById('izm-guide');
+  var modalTitle = document.getElementById('izm-guide-title');
+  var sourceLabel = document.getElementById('izm-guide-source-label');
+  var source = document.getElementById('izm-guide-source');
+  var nameLabel = document.getElementById('izm-guide-name-label');
+  var nameInput = document.getElementById('izm-guide-name');
+  var nameNote = document.getElementById('izm-guide-name-note');
+  var step1 = document.getElementById('izm-guide-step1');
+  var summary = document.getElementById('izm-guide-summary');
+  var summaryTitle = document.getElementById('izm-guide-summary-title');
+  var summaryText = document.getElementById('izm-guide-summary-text');
+  var cancelBtn = document.getElementById('izm-guide-cancel');
+  var backBtn = document.getElementById('izm-guide-back');
+  var nextBtn = document.getElementById('izm-guide-next');
+  var confirmBtn = document.getElementById('izm-guide-confirm');
+  var closeBtn = document.getElementById('izm-guide-close');
+  var wizard = null;
+
+  cancelBtn.textContent = zh ? '取消' : 'Cancel';
+  backBtn.textContent = zh ? '上一步' : 'Back';
+  nextBtn.textContent = zh ? '下一步' : 'Next';
+  confirmBtn.textContent = zh ? '确认创建' : 'Create';
+
+  function closeGuide(){ modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); wizard=null; }
+  function openGuide(type, data){
+    wizard = {type:type, data:data};
+    step1.classList.remove('hidden'); summary.classList.remove('open');
+    backBtn.style.display='none'; nextBtn.style.display='inline-block'; confirmBtn.style.display='none';
+    nameInput.value='';
+    if (type === 'create_snapshot') {
+      modalTitle.textContent = zh ? '创建快照' : 'Create Snapshot';
+      sourceLabel.textContent = zh ? '目标 ZVOL' : 'Target ZVOL';
+      source.textContent = data.zvol;
+      nameLabel.textContent = zh ? '快照名称（可选）' : 'Snapshot name (optional)';
+      nameInput.placeholder = 'before-update';
+      nameNote.textContent = zh ? '留空会自动生成 manual-YYYYMMDD-HHMMSS。' : 'Leave blank to generate manual-YYYYMMDD-HHMMSS automatically.';
+    } else {
+      modalTitle.textContent = zh ? '创建 Clone' : 'Create Clone';
+      sourceLabel.textContent = zh ? '来源快照' : 'Source snapshot';
+      source.textContent = data.snapshot;
+      nameLabel.textContent = zh ? 'Clone 名称（可选）' : 'Clone name (optional)';
+      nameInput.placeholder = data.suggested || 'clone1';
+      nameNote.textContent = zh ? ('留空会自动使用下一个可用名称；当前建议：' + (data.suggested || 'clone1')) : ('Leave blank to use the next available name. Suggested: ' + (data.suggested || 'clone1'));
+    }
+    modal.classList.add('open'); modal.setAttribute('aria-hidden','false'); setTimeout(function(){nameInput.focus();},50);
+  }
+  function showSummary(){
+    if (!wizard) return;
+    step1.classList.add('hidden'); summary.classList.add('open');
+    backBtn.style.display='inline-block'; nextBtn.style.display='none'; confirmBtn.style.display='inline-block';
+    var custom = nameInput.value.trim();
+    summaryTitle.textContent = zh ? '请确认操作' : 'Confirm operation';
+    if (wizard.type === 'create_snapshot') {
+      summaryText.innerHTML = (zh ? 'ZVOL：' : 'ZVOL: ') + '<code>' + esc(wizard.data.zvol) + '</code><br>' + (zh ? '快照名称：' : 'Snapshot name: ') + '<strong>' + esc(custom || (zh ? '自动生成' : 'automatic')) + '</strong>';
+    } else {
+      summaryText.innerHTML = (zh ? '来源：' : 'Source: ') + '<code>' + esc(wizard.data.snapshot) + '</code><br>' + (zh ? 'Clone 名称：' : 'Clone name: ') + '<strong>' + esc(custom || wizard.data.suggested || (zh ? '自动生成' : 'automatic')) + '</strong>';
+    }
+  }
+  async function confirmGuide(){
+    if (!wizard) return;
+    var custom = nameInput.value.trim();
+    confirmBtn.disabled = true;
+    try {
+      if (wizard.type === 'create_snapshot') {
+        await postAction({action:'create_snapshot', zvol:wizard.data.zvol, snapshot_name:custom});
+      } else {
+        await postAction({action:'clone_snapshot', snapshot:wizard.data.snapshot, clone_name:custom});
+      }
+      closeGuide();
+    } finally { confirmBtn.disabled=false; }
+  }
+
+  root.addEventListener('click', function(event){
+    var btn = event.target.closest('[data-izm-op]');
+    if (!btn || btn.disabled) return;
+    var op = btn.getAttribute('data-izm-op');
+    if (op === 'create-snapshot') {
+      openGuide('create_snapshot', {zvol:btn.getAttribute('data-zvol') || ''});
+    } else if (op === 'clone-snapshot') {
+      openGuide('clone_snapshot', {snapshot:btn.getAttribute('data-snapshot') || '', suggested:btn.getAttribute('data-suggested') || ''});
+    } else if (op === 'delete-snapshot') {
+      var snap = btn.getAttribute('data-snapshot') || '';
+      if (window.confirm(zh ? ('确定删除快照？\n' + snap) : ('Delete snapshot?\n' + snap))) postAction({action:'delete_snapshot', snapshot:snap});
+    } else if (op === 'delete-clone') {
+      var clone = btn.getAttribute('data-clone') || '';
+      if (window.confirm(zh ? ('确定删除 Clone？\n' + clone + '\n该操作不可撤销。') : ('Delete clone?\n' + clone + '\nThis cannot be undone.'))) postAction({action:'delete_clone', clone:clone});
+    }
   });
+  nextBtn.addEventListener('click', showSummary);
+  backBtn.addEventListener('click', function(){step1.classList.remove('hidden');summary.classList.remove('open');backBtn.style.display='none';nextBtn.style.display='inline-block';confirmBtn.style.display='none';});
+  confirmBtn.addEventListener('click', confirmGuide);
+  cancelBtn.addEventListener('click', closeGuide); closeBtn.addEventListener('click', closeGuide);
+  modal.addEventListener('click', function(e){ if (e.target === modal) closeGuide(); });
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && modal.classList.contains('open')) closeGuide(); });
 
   loadStatus();
 })();

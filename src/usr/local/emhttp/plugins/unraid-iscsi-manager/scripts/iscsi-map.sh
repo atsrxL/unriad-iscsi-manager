@@ -19,9 +19,22 @@ backstore_type_name() {
   esac
 }
 
+zvol_from_backstore_name() {
+  local name="${1:-}" candidate
+  [[ -n "$name" ]] || return 0
+
+  # Some Unraid/QNAP target configurations name a block backstore after the
+  # ZVOL and replace dataset separators with ':', e.g. intel750mlc:ai.
+  candidate="${name//:/\/}"
+  if [[ "$candidate" == */* ]] && volume_exists "$candidate"; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+}
+
 zvol_for_device() {
-  local device="${1:-}" real volume zdev zreal
-  [[ -n "$device" ]] || return 0
+  local device="${1:-}" backstore_name="${2:-}" real volume zdev zreal inferred
+  [[ -n "$device" || -n "$backstore_name" ]] || return 0
 
   if [[ "$device" == /dev/zvol/* ]]; then
     volume="${device#/dev/zvol/}"
@@ -31,31 +44,60 @@ zvol_for_device() {
     fi
   fi
 
-  real="$(readlink -f -- "$device" 2>/dev/null || true)"
-  [[ -n "$real" ]] || return 0
-  while IFS= read -r volume; do
-    [[ -n "$volume" ]] || continue
-    zdev="/dev/zvol/$volume"
-    zreal="$(readlink -f -- "$zdev" 2>/dev/null || true)"
-    if [[ -n "$zreal" && "$zreal" == "$real" ]]; then
-      printf '%s\n' "$volume"
-      return 0
+  if [[ -n "$device" ]]; then
+    real="$(readlink -f -- "$device" 2>/dev/null || true)"
+    if [[ -n "$real" ]]; then
+      while IFS= read -r volume; do
+        [[ -n "$volume" ]] || continue
+        zdev="/dev/zvol/$volume"
+        zreal="$(readlink -f -- "$zdev" 2>/dev/null || true)"
+        if [[ -n "$zreal" && "$zreal" == "$real" ]]; then
+          printf '%s\n' "$volume"
+          return 0
+        fi
+      done < <("$ZFS_BIN" list -H -t volume -o name 2>/dev/null || true)
     fi
-  done < <("$ZFS_BIN" list -H -t volume -o name 2>/dev/null || true)
+  fi
+
+  inferred="$(zvol_from_backstore_name "$backstore_name")"
+  [[ -n "$inferred" ]] && printf '%s\n' "$inferred"
+}
+
+extract_device_from_text() {
+  local text="${1:-}" device=""
+  [[ -n "$text" ]] || return 0
+
+  # Prefer a stable /dev/zvol path if targetcli prints one. Otherwise accept
+  # any /dev/* path and resolve it against every ZVOL symlink later.
+  device="$(grep -Eo '/dev/zvol/[^ ,)\]]+' <<< "$text" | head -n1 || true)"
+  if [[ -z "$device" ]]; then
+    device="$(grep -Eo '/dev/[^ ,)\]]+' <<< "$text" | head -n1 || true)"
+  fi
+  printf '%s\n' "$device"
 }
 
 backstore_device() {
   local target_dir="${1:-}" type="${2:-}" name="${3:-}" device="" info=""
+
   if [[ -r "$target_dir/udev_path" ]]; then
     device="$(tr -d '\r\n' < "$target_dir/udev_path" 2>/dev/null || true)"
   fi
   if [[ -z "$device" && -r "$target_dir/info" ]]; then
-    device="$(grep -Eo '/dev/[^ ,)]+' "$target_dir/info" 2>/dev/null | head -n1 || true)"
+    info="$(cat "$target_dir/info" 2>/dev/null || true)"
+    device="$(extract_device_from_text "$info")"
   fi
+
   if [[ -z "$device" && -n "$type" && -n "$name" ]] && command -v targetcli >/dev/null 2>&1; then
+    # targetcli-fb versions differ in how much the `info` command exposes.
+    # Try both info and ls and parse the first block-device path shown.
     info="$(targetcli "/backstores/$type/$name" info 2>/dev/null || true)"
-    device="$(grep -Eo '/dev/[^ ,)]+' <<< "$info" | head -n1 || true)"
+    device="$(extract_device_from_text "$info")"
+    if [[ -z "$device" ]]; then
+      info="$(targetcli "/backstores/$type/$name" ls 2>/dev/null || true)"
+      device="$(extract_device_from_text "$info")"
+    fi
   fi
+
   printf '%s\n' "$device"
 }
 
@@ -69,8 +111,6 @@ backstore_unmap() {
     esac
   fi
 
-  # Some packaged LIO/configfs layouts do not expose the attribute through
-  # the resolved LUN symlink in the same way. Ask targetcli as a fallback.
   if command -v targetcli >/dev/null 2>&1 && [[ -n "$type" && -n "$name" ]]; then
     output="$(targetcli "/backstores/$type/$name" get attribute emulate_tpu 2>/dev/null || true)"
     if grep -Eq 'emulate_tpu([ =:]+)1([[:space:]]|$)' <<< "$output"; then
@@ -84,6 +124,19 @@ backstore_unmap() {
   fi
 
   echo "unknown"
+}
+
+targetcli_lun_backstore() {
+  local iqn="${1:-}" tpg="${2:-}" lun_id="${3:-}" output line pair=""
+  command -v targetcli >/dev/null 2>&1 || return 0
+  [[ -n "$iqn" && -n "$tpg" && -n "$lun_id" ]] || return 0
+
+  output="$(targetcli "/iscsi/$iqn/$tpg/luns/lun$lun_id" ls 2>/dev/null || true)"
+  while IFS= read -r line; do
+    # Typical summary contains: [block/iscsi (...)]
+    pair="$(sed -nE 's/.*\[([A-Za-z0-9_-]+)\/([^][[:space:]()]+).*/\1\t\2/p' <<< "$line" | head -n1)"
+    [[ -n "$pair" ]] && { printf '%b\n' "$pair"; return 0; }
+  done <<< "$output"
 }
 
 root="${TARGET_ISCSI_ROOT:-/sys/kernel/config/target/iscsi}"
@@ -117,8 +170,22 @@ for iqn_dir in "$root"/*; do
           backstore="$(basename "$target_dir")"
           core_type="$(basename "$(dirname "$target_dir")")"
           type="$(backstore_type_name "$core_type")"
+        else
+          pair="$(targetcli_lun_backstore "$iqn" "$tpg" "$lun_id")"
+          if [[ -n "$pair" ]]; then
+            IFS=$'\t' read -r type backstore <<< "$pair"
+            # Resolve the configfs storage object if possible for attributes.
+            for candidate in /sys/kernel/config/target/core/*/"$backstore"; do
+              [[ -d "$candidate" ]] || continue
+              target_dir="$candidate"
+              break
+            done
+          fi
+        fi
+
+        if [[ -n "$type" && -n "$backstore" ]]; then
           device="$(backstore_device "$target_dir" "$type" "$backstore")"
-          zvol="$(zvol_for_device "$device")"
+          zvol="$(zvol_for_device "$device" "$backstore")"
           unmap="$(backstore_unmap "$target_dir" "$type" "$backstore")"
         fi
 
