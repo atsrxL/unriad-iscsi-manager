@@ -5,8 +5,9 @@ Tag="fa-dashboard"
 Markdown="false"
 ---
 <style>
-.izm-guide-backdrop{position:fixed!important;inset:0!important;background:rgba(0,0,0,.55)!important;z-index:2147483000!important;display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;isolation:isolate}.izm-guide-backdrop.open{display:flex!important}.izm-guide-dialog{position:relative!important;z-index:2147483001!important;width:min(560px,calc(100vw - 40px));max-height:calc(100vh - 40px);overflow:auto;background:#f3f3f3;color:#222;border:1px solid rgba(127,127,127,.45);border-radius:10px;box-shadow:0 20px 80px rgba(0,0,0,.48);opacity:1!important}.izm-guide-head{display:flex;justify-content:space-between;align-items:center;padding:14px 16px;border-bottom:1px solid rgba(127,127,127,.25)}.izm-guide-head strong{font-size:17px}.izm-guide-close{font-size:22px;line-height:1;border:0;background:transparent;color:inherit;cursor:pointer}.izm-guide-body{padding:16px}.izm-guide-source{padding:10px 11px;border:1px solid rgba(127,127,127,.28);border-radius:6px;background:rgba(127,127,127,.08);overflow-wrap:anywhere}.izm-guide-field{margin-top:15px}.izm-guide-field label{display:block;font-weight:600;margin-bottom:6px}.izm-guide-field input{width:100%;box-sizing:border-box}.izm-guide-note{font-size:12px;opacity:.75;line-height:1.5;margin-top:6px}.izm-guide-summary{display:none}.izm-guide-summary.open{display:block}.izm-guide-step1.hidden{display:none}.izm-guide-error{display:none;margin-top:12px;padding:9px 10px;border:1px solid rgba(220,53,69,.45);background:rgba(220,53,69,.10);border-radius:6px;white-space:pre-wrap}.izm-guide-error.open{display:block}.izm-guide-foot{display:flex;justify-content:space-between;gap:8px;padding:12px 16px;border-top:1px solid rgba(127,127,127,.25)}.izm-guide-foot-right{display:flex;gap:8px}.izm-guide-secondary{opacity:.82}.izm-guide-dialog button:disabled{opacity:.42;cursor:not-allowed}
+.izm-guide-backdrop{position:fixed!important;inset:0!important;display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box;background:rgba(0,0,0,.58)!important;z-index:2147483000!important}.izm-guide-backdrop.open{display:flex!important}.izm-guide-dialog{position:relative;width:min(560px,calc(100vw - 40px));max-height:calc(100vh - 40px);overflow:auto;background:#f3f3f3;color:#222;border:1px solid rgba(127,127,127,.42);border-radius:10px;box-shadow:0 20px 80px rgba(0,0,0,.5)}.izm-guide-head{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid rgba(127,127,127,.25)}.izm-guide-head strong{font-size:17px}.izm-guide-close{font-size:22px;line-height:1;border:0;background:transparent;color:inherit;cursor:pointer}.izm-guide-body{padding:16px}.izm-guide-source{padding:10px 11px;border:1px solid rgba(127,127,127,.28);border-radius:6px;background:rgba(127,127,127,.08);overflow-wrap:anywhere}.izm-guide-field{margin-top:15px}.izm-guide-field label{display:block;font-weight:600;margin-bottom:6px}.izm-guide-field input{width:100%;box-sizing:border-box}.izm-guide-note{font-size:12px;opacity:.75;line-height:1.5;margin-top:6px}.izm-guide-summary{display:none}.izm-guide-summary.open{display:block}.izm-guide-step1.hidden{display:none}.izm-guide-error{display:none;margin-top:12px;padding:9px 10px;border:1px solid rgba(220,53,69,.45);background:rgba(220,53,69,.10);border-radius:6px;white-space:pre-wrap}.izm-guide-error.open{display:block}.izm-guide-foot{display:flex;justify-content:space-between;gap:8px;padding:12px 16px;border-top:1px solid rgba(127,127,127,.25)}.izm-guide-foot-right{display:flex;gap:8px}.izm-guide-dialog button:disabled{opacity:.42;cursor:not-allowed}
 </style>
+
 <div class="izm-wrap" style="max-width:1500px">
   <h2 id="izm-status-tree-title">Z Status</h2>
   <div id="izm-status-tree-root" style="margin-top:12px">
@@ -14,11 +15,13 @@ Markdown="false"
   </div>
 </div>
 
+<iframe id="izm-snapshot-action-frame" name="izm-snapshot-action-frame" style="display:none" aria-hidden="true"></iframe>
+
 <div id="izm-guide" class="izm-guide-backdrop" aria-hidden="true">
   <div class="izm-guide-dialog" role="dialog" aria-modal="true" aria-labelledby="izm-guide-title">
     <div class="izm-guide-head"><strong id="izm-guide-title"></strong><button type="button" class="izm-guide-close" id="izm-guide-close">×</button></div>
     <div class="izm-guide-body">
-      <div class="izm-guide-step1" id="izm-guide-step1">
+      <div id="izm-guide-step1">
         <div id="izm-guide-source-label" class="izm-guide-note" style="margin:0 0 6px"></div>
         <div class="izm-guide-source"><code id="izm-guide-source"></code></div>
         <div class="izm-guide-field">
@@ -34,9 +37,9 @@ Markdown="false"
       <div class="izm-guide-error" id="izm-guide-error"></div>
     </div>
     <div class="izm-guide-foot">
-      <button type="button" class="izm-guide-secondary" id="izm-guide-cancel"></button>
+      <button type="button" id="izm-guide-cancel"></button>
       <div class="izm-guide-foot-right">
-        <button type="button" class="izm-guide-secondary" id="izm-guide-back" style="display:none"></button>
+        <button type="button" id="izm-guide-back" style="display:none"></button>
         <button type="button" id="izm-guide-next"></button>
         <button type="button" id="izm-guide-confirm" style="display:none"></button>
       </div>
@@ -46,215 +49,131 @@ Markdown="false"
 
 <script>
 (function(){
-  var root = document.getElementById('izm-status-tree-root');
-  if (!root) return;
-  var rawLang = (document.documentElement && document.documentElement.lang) || navigator.language || 'en';
-  var lang = /^zh/i.test(rawLang) ? 'zh_CN' : 'en';
-  var zh = lang === 'zh_CN';
-  var title = document.getElementById('izm-status-tree-title');
-  var loading = document.getElementById('izm-status-tree-loading');
-  if (zh) {
-    if (title) title.textContent = 'ZFS / iSCSI 状态';
-    if (loading) loading.textContent = '正在加载 ZFS / iSCSI 状态…';
+  var root=document.getElementById('izm-status-tree-root');
+  if(!root)return;
+  var rawLang=(document.documentElement&&document.documentElement.lang)||navigator.language||'en';
+  var lang=/^zh/i.test(rawLang)?'zh_CN':'en', zh=lang==='zh_CN';
+  var treeEndpoint='/plugins/unraid-iscsi-manager/status-tree.php?lang='+encodeURIComponent(lang);
+  var title=document.getElementById('izm-status-tree-title');
+  var loading=document.getElementById('izm-status-tree-loading');
+  if(zh){if(title)title.textContent='ZFS / iSCSI 状态';if(loading)loading.textContent='正在加载 ZFS / iSCSI 状态…';}
+
+  function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c];});}
+  function csrf(){var n=root.querySelector('[data-izm-csrf]');return n?n.getAttribute('data-izm-csrf')||'':'';}
+  function notice(message,ok){if(!message)return;var d=document.createElement('div');d.className=ok?'izm-ok':'izm-err';d.textContent=message;root.insertBefore(d,root.firstChild);}
+  function treeError(message){root.innerHTML='<div style="white-space:pre-wrap;border:1px solid rgba(220,53,69,.45);background:rgba(220,53,69,.10);border-radius:6px;padding:12px 14px"><strong>'+(zh?'Z Status 加载失败':'Failed to load Z Status')+'</strong><br>'+esc(message)+'</div>';}
+
+  async function loadStatus(){
+    try{
+      var r=await fetch(treeEndpoint,{method:'GET',credentials:'same-origin',cache:'no-store',headers:{'X-Requested-With':'XMLHttpRequest'}});
+      var text=await r.text();
+      if(!r.ok)throw new Error('HTTP '+r.status+(text?'\n'+text.slice(0,1600):''));
+      if(!text.trim())throw new Error(zh?'后端返回空响应。':'Backend returned an empty response.');
+      root.innerHTML=text;
+    }catch(e){console.error(e);treeError(e&&e.message?e.message:e);}
   }
 
-  var treeEndpoint = '/plugins/unraid-iscsi-manager/status-tree.php?lang=' + encodeURIComponent(lang);
-  var actionEndpoint = '/plugins/unraid-iscsi-manager/status-action.php?lang=' + encodeURIComponent(lang);
-
-  function esc(value) {
-    return String(value == null ? '' : value).replace(/[&<>"']/g, function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c];});
-  }
-  function showError(message) {
-    root.innerHTML = '<div style="white-space:pre-wrap;border:1px solid rgba(220,53,69,.45);background:rgba(220,53,69,.10);border-radius:6px;padding:12px 14px">' +
-      '<strong>' + (zh ? 'Z Status 加载失败' : 'Failed to load Z Status') + '</strong><br>' + esc(message) + '</div>';
-  }
-  function csrf() {
-    var node = root.querySelector('[data-izm-csrf]');
-    return node ? node.getAttribute('data-izm-csrf') || '' : '';
-  }
-  function prependNotice(message, ok) {
-    if (!message) return;
-    var div = document.createElement('div');
-    div.className = ok ? 'izm-ok' : 'izm-err';
-    div.textContent = message;
-    root.insertBefore(div, root.firstChild);
-  }
-
-  async function loadStatus() {
-    try {
-      var response = await fetch(treeEndpoint, {
-        method: 'GET', credentials: 'same-origin', cache: 'no-store', headers: {'X-Requested-With':'XMLHttpRequest'}
-      });
-      var text = await response.text();
-      if (!response.ok) throw new Error('HTTP ' + response.status + (text ? '\n' + text.slice(0, 2000) : ''));
-      if (!text.trim()) throw new Error(zh ? '后端返回空响应。' : 'Backend returned an empty response.');
-      root.innerHTML = text;
-    } catch (error) {
-      console.error('unraid-iscsi-manager Z Status:', error);
-      showError(error && error.message ? error.message : error);
-      throw error;
+  function snapshotManagerUrl(){
+    var links=document.querySelectorAll('a[href]');
+    for(var i=0;i<links.length;i++){
+      var href=links[i].getAttribute('href')||'';
+      if(href.indexOf('unraid-iscsi-manager-snapshots')!==-1)return new URL(href,window.location.href).href;
     }
+    return new URL('/Settings/unraid-iscsi-manager-snapshots',window.location.origin).href;
   }
 
-  async function runAction(fields) {
-    var token = csrf();
-    if (!token) throw new Error(zh ? '无法取得 Unraid CSRF token，请刷新页面后重试。' : 'Unable to obtain the Unraid CSRF token. Refresh the page and try again.');
-    var body = new FormData();
-    body.append('csrf_token', token);
-    Object.keys(fields).forEach(function(k){ body.append(k, fields[k] == null ? '' : fields[k]); });
-
-    var response = await fetch(actionEndpoint, {
-      method:'POST', body:body, credentials:'same-origin', cache:'no-store',
-      headers:{'X-Requested-With':'XMLHttpRequest','X-CSRF-Token':token}
-    });
-    var text = await response.text();
-    var data = null;
-    try { data = text ? JSON.parse(text) : null; } catch (_) {}
-    if (!response.ok || !data || data.ok !== true) {
-      var message = data && (data.message || data.error) ? (data.message || data.error) : ('HTTP ' + response.status + (text ? '\n' + text.slice(0,1200) : ''));
-      throw new Error(message);
-    }
-    return data;
+  var frame=document.getElementById('izm-snapshot-action-frame');
+  var pending=null, pendingTimer=null;
+  function setPendingControls(disabled){
+    confirmBtn.disabled=disabled;backBtn.disabled=disabled;cancelBtn.disabled=disabled;closeBtn.disabled=disabled;
+    if(disabled)confirmBtn.textContent=zh?'正在提交…':'Submitting…';
+    else confirmBtn.textContent=zh?'确认创建':'Create';
+  }
+  function submitThroughSnapshotManager(action,fields,kind){
+    if(pending)throw new Error(zh?'已有操作正在进行。':'Another operation is already in progress.');
+    var token=csrf();
+    if(!token)throw new Error(zh?'无法取得 Unraid CSRF token，请刷新页面。':'Unable to obtain Unraid CSRF token. Refresh the page.');
+    var form=document.createElement('form');
+    form.method='post';form.action=snapshotManagerUrl();form.target=frame.name;form.style.display='none';
+    var all=Object.assign({csrf_token:token,action:action},fields||{});
+    Object.keys(all).forEach(function(k){var input=document.createElement('input');input.type='hidden';input.name=k;input.value=all[k]==null?'':String(all[k]);form.appendChild(input);});
+    pending={kind:kind||'action',started:Date.now()};
+    document.body.appendChild(form);form.submit();form.remove();
+    clearTimeout(pendingTimer);
+    pendingTimer=setTimeout(function(){
+      if(!pending)return;
+      var msg=zh?'操作等待时间过长。快照管理页本身如果可以正常创建，请刷新此页后确认结果。':'The operation is taking unusually long. Refresh this page and verify the result.';
+      if(pending.kind==='modal'){showGuideError(msg);setPendingControls(false);}else window.alert(msg);
+      pending=null;
+    },20000);
   }
 
-  var modal = document.getElementById('izm-guide');
-  var dialog = modal.querySelector('.izm-guide-dialog');
-  var modalTitle = document.getElementById('izm-guide-title');
-  var sourceLabel = document.getElementById('izm-guide-source-label');
-  var source = document.getElementById('izm-guide-source');
-  var nameLabel = document.getElementById('izm-guide-name-label');
-  var nameInput = document.getElementById('izm-guide-name');
-  var nameNote = document.getElementById('izm-guide-name-note');
-  var step1 = document.getElementById('izm-guide-step1');
-  var summary = document.getElementById('izm-guide-summary');
-  var summaryTitle = document.getElementById('izm-guide-summary-title');
-  var summaryText = document.getElementById('izm-guide-summary-text');
-  var modalError = document.getElementById('izm-guide-error');
-  var cancelBtn = document.getElementById('izm-guide-cancel');
-  var backBtn = document.getElementById('izm-guide-back');
-  var nextBtn = document.getElementById('izm-guide-next');
-  var confirmBtn = document.getElementById('izm-guide-confirm');
-  var closeBtn = document.getElementById('izm-guide-close');
-  var wizard = null;
-
-  // Unraid's tab/content containers can create their own stacking contexts.
-  // Keep the modal at document.body level so tree rows can never paint above it.
-  if (modal.parentNode !== document.body) document.body.appendChild(modal);
-  (function syncModalTheme(){
-    var host = root.closest('.content') || root.parentElement || document.body;
-    var style = window.getComputedStyle(host);
-    var bg = style.backgroundColor;
-    if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = window.getComputedStyle(document.body).backgroundColor;
-    if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = '#f3f3f3';
-    dialog.style.backgroundColor = bg;
-    dialog.style.color = style.color || window.getComputedStyle(document.body).color;
-  })();
-
-  cancelBtn.textContent = zh ? '取消' : 'Cancel';
-  backBtn.textContent = zh ? '上一步' : 'Back';
-  nextBtn.textContent = zh ? '下一步' : 'Next';
-  confirmBtn.textContent = zh ? '确认创建' : 'Create';
-
-  function clearGuideError(){ modalError.textContent=''; modalError.classList.remove('open'); }
-  function showGuideError(message){ modalError.textContent=String(message || (zh ? '操作失败。' : 'Operation failed.')); modalError.classList.add('open'); }
-  function closeGuide(){ modal.classList.remove('open'); modal.setAttribute('aria-hidden','true'); document.body.style.overflow=''; wizard=null; clearGuideError(); }
-  function openGuide(type, data){
-    wizard = {type:type, data:data};
-    clearGuideError();
-    step1.classList.remove('hidden'); summary.classList.remove('open');
-    backBtn.style.display='none'; nextBtn.style.display='inline-block'; confirmBtn.style.display='none';
-    confirmBtn.disabled=false; nameInput.value='';
-    if (type === 'create_snapshot') {
-      modalTitle.textContent = zh ? '创建快照' : 'Create Snapshot';
-      sourceLabel.textContent = zh ? '目标 ZVOL' : 'Target ZVOL';
-      source.textContent = data.zvol;
-      nameLabel.textContent = zh ? '快照名称（可选）' : 'Snapshot name (optional)';
-      nameInput.placeholder = 'before-update';
-      nameNote.textContent = zh ? '留空会自动生成 manual-YYYYMMDD-HHMMSS。' : 'Leave blank to generate manual-YYYYMMDD-HHMMSS automatically.';
-    } else {
-      modalTitle.textContent = zh ? '创建 Clone' : 'Create Clone';
-      sourceLabel.textContent = zh ? '来源快照' : 'Source snapshot';
-      source.textContent = data.snapshot;
-      nameLabel.textContent = zh ? 'Clone 名称（可选）' : 'Clone name (optional)';
-      nameInput.placeholder = data.suggested || 'clone1';
-      nameNote.textContent = zh ? ('留空会自动使用下一个可用名称；当前建议：' + (data.suggested || 'clone1')) : ('Leave blank to use the next available name. Suggested: ' + (data.suggested || 'clone1'));
-    }
-    modal.classList.add('open'); modal.setAttribute('aria-hidden','false'); document.body.style.overflow='hidden';
-    setTimeout(function(){nameInput.focus();},50);
-  }
-  function showSummary(){
-    if (!wizard) return;
-    clearGuideError();
-    step1.classList.add('hidden'); summary.classList.add('open');
-    backBtn.style.display='inline-block'; nextBtn.style.display='none'; confirmBtn.style.display='inline-block';
-    var custom = nameInput.value.trim();
-    summaryTitle.textContent = zh ? '请确认操作' : 'Confirm operation';
-    if (wizard.type === 'create_snapshot') {
-      summaryText.innerHTML = (zh ? 'ZVOL：' : 'ZVOL: ') + '<code>' + esc(wizard.data.zvol) + '</code><br>' + (zh ? '快照名称：' : 'Snapshot name: ') + '<strong>' + esc(custom || (zh ? '自动生成' : 'automatic')) + '</strong>';
-    } else {
-      summaryText.innerHTML = (zh ? '来源：' : 'Source: ') + '<code>' + esc(wizard.data.snapshot) + '</code><br>' + (zh ? 'Clone 名称：' : 'Clone name: ') + '<strong>' + esc(custom || wizard.data.suggested || (zh ? '自动生成' : 'automatic')) + '</strong>';
-    }
-  }
-  async function confirmGuide(){
-    if (!wizard || confirmBtn.disabled) return;
-    var custom = nameInput.value.trim();
-    confirmBtn.disabled = true; backBtn.disabled=true; cancelBtn.disabled=true; closeBtn.disabled=true;
-    confirmBtn.textContent = zh ? '正在创建…' : 'Creating…';
-    clearGuideError();
-    try {
-      var result;
-      if (wizard.type === 'create_snapshot') {
-        result = await runAction({action:'create_snapshot', zvol:wizard.data.zvol, snapshot_name:custom});
-      } else {
-        result = await runAction({action:'clone_snapshot', snapshot:wizard.data.snapshot, clone_name:custom});
+  frame.addEventListener('load',function(){
+    if(!pending)return;
+    clearTimeout(pendingTimer);
+    var current=pending;pending=null;
+    try{
+      var doc=frame.contentDocument||frame.contentWindow.document;
+      var err=doc.querySelector('.izm-err');
+      var ok=doc.querySelector('.izm-ok');
+      var errText=err?err.textContent.trim():'';
+      var okText=ok?ok.textContent.trim():'';
+      if(errText){
+        if(current.kind==='modal'){showGuideError(errText);setPendingControls(false);}else window.alert(errText);
+        return;
       }
-      var message = result && result.message ? result.message : (zh ? '创建完成。' : 'Created.');
-      closeGuide();
-      await loadStatus();
-      prependNotice(message, true);
-    } catch (error) {
-      console.error('unraid-iscsi-manager action:', error);
-      showGuideError(error && error.message ? error.message : error);
-    } finally {
-      confirmBtn.disabled=false; backBtn.disabled=false; cancelBtn.disabled=false; closeBtn.disabled=false;
-      confirmBtn.textContent = zh ? '确认创建' : 'Create';
-    }
-  }
-  async function destructiveAction(fields, confirmText) {
-    if (!window.confirm(confirmText)) return;
-    try {
-      var result = await runAction(fields);
-      await loadStatus();
-      prependNotice(result.message || (zh ? '操作完成。' : 'Operation completed.'), true);
-    } catch (error) {
-      console.error('unraid-iscsi-manager action:', error);
-      window.alert(error && error.message ? error.message : error);
-    }
-  }
-
-  root.addEventListener('click', function(event){
-    var btn = event.target.closest('[data-izm-op]');
-    if (!btn || btn.disabled) return;
-    var op = btn.getAttribute('data-izm-op');
-    if (op === 'create-snapshot') {
-      openGuide('create_snapshot', {zvol:btn.getAttribute('data-zvol') || ''});
-    } else if (op === 'clone-snapshot') {
-      openGuide('clone_snapshot', {snapshot:btn.getAttribute('data-snapshot') || '', suggested:btn.getAttribute('data-suggested') || ''});
-    } else if (op === 'delete-snapshot') {
-      var snap = btn.getAttribute('data-snapshot') || '';
-      destructiveAction({action:'delete_snapshot', snapshot:snap}, zh ? ('确定删除快照？\n' + snap) : ('Delete snapshot?\n' + snap));
-    } else if (op === 'delete-clone') {
-      var clone = btn.getAttribute('data-clone') || '';
-      destructiveAction({action:'delete_clone', clone:clone}, zh ? ('确定删除 Clone？\n' + clone + '\n该操作不可撤销。') : ('Delete clone?\n' + clone + '\nThis cannot be undone.'));
+      if(!okText){
+        var body=(doc.body&&doc.body.innerText?doc.body.innerText.trim():'').slice(0,1000);
+        var msg=zh?'快照管理页没有返回明确的成功状态。':'Snapshot Manager returned no explicit success status.';
+        if(body)msg+='\n'+body;
+        if(current.kind==='modal'){showGuideError(msg);setPendingControls(false);}else window.alert(msg);
+        return;
+      }
+      if(current.kind==='modal')closeGuide();
+      loadStatus().then(function(){notice(okText,true);});
+    }catch(e){
+      var msg=(e&&e.message)?e.message:String(e);
+      if(current.kind==='modal'){showGuideError(msg);setPendingControls(false);}else window.alert(msg);
     }
   });
-  nextBtn.addEventListener('click', showSummary);
-  backBtn.addEventListener('click', function(){clearGuideError();step1.classList.remove('hidden');summary.classList.remove('open');backBtn.style.display='none';nextBtn.style.display='inline-block';confirmBtn.style.display='none';});
-  confirmBtn.addEventListener('click', confirmGuide);
-  cancelBtn.addEventListener('click', closeGuide); closeBtn.addEventListener('click', closeGuide);
-  modal.addEventListener('click', function(e){ if (e.target === modal && !confirmBtn.disabled) closeGuide(); });
-  document.addEventListener('keydown', function(e){ if (e.key === 'Escape' && modal.classList.contains('open') && !confirmBtn.disabled) closeGuide(); });
 
+  var modal=document.getElementById('izm-guide');
+  var dialog=modal.querySelector('.izm-guide-dialog');
+  var modalTitle=document.getElementById('izm-guide-title'),sourceLabel=document.getElementById('izm-guide-source-label'),source=document.getElementById('izm-guide-source');
+  var nameLabel=document.getElementById('izm-guide-name-label'),nameInput=document.getElementById('izm-guide-name'),nameNote=document.getElementById('izm-guide-name-note');
+  var step1=document.getElementById('izm-guide-step1'),summary=document.getElementById('izm-guide-summary'),summaryTitle=document.getElementById('izm-guide-summary-title'),summaryText=document.getElementById('izm-guide-summary-text'),modalError=document.getElementById('izm-guide-error');
+  var cancelBtn=document.getElementById('izm-guide-cancel'),backBtn=document.getElementById('izm-guide-back'),nextBtn=document.getElementById('izm-guide-next'),confirmBtn=document.getElementById('izm-guide-confirm'),closeBtn=document.getElementById('izm-guide-close');
+  var wizard=null;
+  if(modal.parentNode!==document.body)document.body.appendChild(modal);
+  (function(){var host=root.closest('.content')||root.parentElement||document.body,s=window.getComputedStyle(host),bg=s.backgroundColor;if(!bg||bg==='rgba(0, 0, 0, 0)'||bg==='transparent')bg=window.getComputedStyle(document.body).backgroundColor;if(bg&&bg!=='rgba(0, 0, 0, 0)'&&bg!=='transparent')dialog.style.backgroundColor=bg;dialog.style.color=s.color||window.getComputedStyle(document.body).color;})();
+  cancelBtn.textContent=zh?'取消':'Cancel';backBtn.textContent=zh?'上一步':'Back';nextBtn.textContent=zh?'下一步':'Next';confirmBtn.textContent=zh?'确认创建':'Create';
+  function clearGuideError(){modalError.textContent='';modalError.classList.remove('open');}
+  function showGuideError(m){modalError.textContent=String(m||'');modalError.classList.add('open');}
+  function closeGuide(){modal.classList.remove('open');modal.setAttribute('aria-hidden','true');document.body.style.overflow='';wizard=null;clearGuideError();setPendingControls(false);}
+  function openGuide(type,data){
+    if(pending)return;
+    wizard={type:type,data:data};clearGuideError();step1.classList.remove('hidden');summary.classList.remove('open');backBtn.style.display='none';nextBtn.style.display='inline-block';confirmBtn.style.display='none';nameInput.value='';setPendingControls(false);
+    if(type==='create_snapshot'){modalTitle.textContent=zh?'创建快照':'Create Snapshot';sourceLabel.textContent=zh?'目标 ZVOL':'Target ZVOL';source.textContent=data.zvol;nameLabel.textContent=zh?'快照名称（可选）':'Snapshot name (optional)';nameInput.placeholder='before-update';nameNote.textContent=zh?'留空自动生成 manual-YYYYMMDD-HHMMSS。':'Leave blank to generate manual-YYYYMMDD-HHMMSS automatically.';}
+    else{modalTitle.textContent=zh?'创建 Clone':'Create Clone';sourceLabel.textContent=zh?'来源快照':'Source snapshot';source.textContent=data.snapshot;nameLabel.textContent=zh?'Clone 名称（可选）':'Clone name (optional)';nameInput.placeholder=data.suggested||'clone1';nameNote.textContent=zh?('留空使用下一个可用名称；建议：'+(data.suggested||'clone1')):('Leave blank to use the next available name. Suggested: '+(data.suggested||'clone1'));}
+    modal.classList.add('open');modal.setAttribute('aria-hidden','false');document.body.style.overflow='hidden';setTimeout(function(){nameInput.focus();},40);
+  }
+  function showSummary(){if(!wizard)return;clearGuideError();step1.classList.add('hidden');summary.classList.add('open');backBtn.style.display='inline-block';nextBtn.style.display='none';confirmBtn.style.display='inline-block';var custom=nameInput.value.trim();summaryTitle.textContent=zh?'请确认操作':'Confirm operation';if(wizard.type==='create_snapshot')summaryText.innerHTML=(zh?'ZVOL：':'ZVOL: ')+'<code>'+esc(wizard.data.zvol)+'</code><br>'+(zh?'快照名称：':'Snapshot name: ')+'<strong>'+esc(custom||(zh?'自动生成':'automatic'))+'</strong>';else summaryText.innerHTML=(zh?'来源：':'Source: ')+'<code>'+esc(wizard.data.snapshot)+'</code><br>'+(zh?'Clone 名称：':'Clone name: ')+'<strong>'+esc(custom||wizard.data.suggested||(zh?'自动生成':'automatic'))+'</strong>';}
+  function confirmGuide(){
+    if(!wizard||pending)return;clearGuideError();setPendingControls(true);var custom=nameInput.value.trim();
+    try{
+      if(wizard.type==='create_snapshot')submitThroughSnapshotManager('create_snapshot',{selected_zvol:wizard.data.zvol,snapshot_name:custom},'modal');
+      else{var sourceZvol=(wizard.data.snapshot||'').split('@')[0];submitThroughSnapshotManager('clone_snapshot',{selected_zvol:sourceZvol,snapshot:wizard.data.snapshot,clone_name:custom},'modal');}
+    }catch(e){showGuideError(e&&e.message?e.message:e);setPendingControls(false);}
+  }
+
+  root.addEventListener('click',function(event){
+    var btn=event.target.closest('[data-izm-op]');if(!btn||btn.disabled||pending)return;var op=btn.getAttribute('data-izm-op');
+    if(op==='create-snapshot')openGuide('create_snapshot',{zvol:btn.getAttribute('data-zvol')||''});
+    else if(op==='clone-snapshot')openGuide('clone_snapshot',{snapshot:btn.getAttribute('data-snapshot')||'',suggested:btn.getAttribute('data-suggested')||''});
+    else if(op==='delete-snapshot'){var snap=btn.getAttribute('data-snapshot')||'';if(window.confirm((zh?'确定删除快照？\n':'Delete snapshot?\n')+snap))submitThroughSnapshotManager('delete_snapshot',{selected_zvol:snap.split('@')[0],snapshot:snap},'delete');}
+    else if(op==='delete-clone'){var clone=btn.getAttribute('data-clone')||'';if(window.confirm((zh?'确定删除 Clone？\n':'Delete clone?\n')+clone))submitThroughSnapshotManager('delete_clone',{selected_zvol:'',clone:clone},'delete');}
+  });
+  nextBtn.addEventListener('click',showSummary);backBtn.addEventListener('click',function(){clearGuideError();step1.classList.remove('hidden');summary.classList.remove('open');backBtn.style.display='none';nextBtn.style.display='inline-block';confirmBtn.style.display='none';});confirmBtn.addEventListener('click',confirmGuide);cancelBtn.addEventListener('click',function(){if(!pending)closeGuide();});closeBtn.addEventListener('click',function(){if(!pending)closeGuide();});modal.addEventListener('click',function(e){if(e.target===modal&&!pending)closeGuide();});document.addEventListener('keydown',function(e){if(e.key==='Escape'&&modal.classList.contains('open')&&!pending)closeGuide();});
   loadStatus();
 })();
 </script>
