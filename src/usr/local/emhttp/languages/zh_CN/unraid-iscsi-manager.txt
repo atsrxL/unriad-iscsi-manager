@@ -1,0 +1,6 @@
+iSCSI ZVOL Manager=iSCSI ZVOL 管理器
+Z Status=ZFS / iSCSI 状态
+ZVOL Creator=ZVOL 创建
+Snapshot Manager=快照管理
+Snapshot Refresher=快照刷新
+Misc=其他
