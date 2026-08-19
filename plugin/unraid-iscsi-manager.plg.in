@@ -25,11 +25,12 @@
 
 <CHANGES>
 ### @VERSION@
-- Fix the Z Status white screen seen on Unraid 7.3.x after the resource-tree redesign.
-- Replace page-global status helper functions with request-local closures to avoid eval/runtime collisions in Unraid's .page renderer.
-- Wrap Z Status data loading and tree construction in a Throwable guard so runtime problems are shown in-page instead of being reduced to an empty tab.
-- Keep the Pool -> ZVOL -> Snapshot -> Clone resource tree, live iSCSI initiator display, and separated Automatic/Manual TRIM controls.
-- Keep the duplicate space-reclaim explanation out of Z Status; detailed UNMAP/TRIM guidance remains in Misc.
+- Fix the persistent Z Status white screen on Unraid 7.3.x by explicitly disabling Unraid Markdown processing for raw plugin pages.
+- Move the heavy Z Status tree renderer out of the .page eval path into a standalone status-tree.php endpoint loaded with fetch/AJAX.
+- If the status backend fails, show the HTTP/backend error inside the tab instead of allowing Unraid to clear the entire panel output.
+- Force Markdown="false" into every packaged plugin .page that has a body, preventing future PHP/HTML pages from being rewritten before eval.
+- Add CI checks that simulate Unraid's eval('?>' . content) behavior for the Z Status wrapper and verify packaged page headers.
+- Preserve the Pool -> ZVOL -> Snapshot -> Clone tree, live iSCSI initiator display, and separated Automatic/Manual TRIM controls.
 </CHANGES>
 
 <FILE Run="/bin/bash">

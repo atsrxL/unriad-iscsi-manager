@@ -17,6 +17,20 @@ mkdir -p "$STAGE" "$DIST"
 cp -a "$ROOT/src/." "$STAGE/"
 chmod 0755 "$STAGE/usr/local/emhttp/plugins/$NAME/scripts/"*.sh
 
+# Unraid's generateContent() runs .page bodies through Markdown by default when
+# the Markdown header is omitted. These plugin pages contain raw PHP/HTML/JS,
+# so force Markdown="false" in every staged page that has a body separator.
+for page in "$STAGE/usr/local/emhttp/plugins/$NAME/"*.page; do
+  [[ -f "$page" ]] || continue
+  grep -q '^---$' "$page" || continue
+  header="$(sed -n '1,/^---$/p' "$page")"
+  if ! grep -q '^Markdown=' <<< "$header"; then
+    tmp="${page}.tmp"
+    awk 'BEGIN{done=0} /^---$/ && !done {print "Markdown=\"false\""; done=1} {print}' "$page" > "$tmp"
+    mv "$tmp" "$page"
+  fi
+done
+
 PACKAGE="$DIST/$NAME-$VERSION.txz"
 PLG="$DIST/$NAME.plg"
 
