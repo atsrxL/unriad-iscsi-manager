@@ -5,7 +5,6 @@ define('IZM_ISCSI_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scrip
 define('IZM_SESSIONS_SCRIPT', '/usr/local/emhttp/plugins/unraid-iscsi-manager/scripts/iscsi-sessions.sh');
 
 require_once '/usr/local/emhttp/plugins/unraid-iscsi-manager/include/i18n.php';
-izm_i18n_start();
 
 function izm_h($value) {
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -270,6 +269,7 @@ function izm_styles() {
 @media (max-width:700px) { .izm-table { display:block; overflow-x:auto; } }
 </style>
 CSS;
+    izm_i18n_emit_script();
 }
 
 function izm_notices($message, $error, $zfsAvailable, $zfsOutput = '') {
